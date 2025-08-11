@@ -56,65 +56,146 @@ function Home() {
   const [datasetsSearch, setDatasetsSearch] = useState("");
 
   const resizerRef = useRef(null);
-  
-  // Add this at the top of your Home component, after the imports
-useEffect(() => {
-  // Suppress ResizeObserver errors
-  const resizeObserverErrDiv = document.getElementById('webpack-dev-server-client-overlay-div');
-  const resizeObserverErr = document.getElementById('webpack-dev-server-client-overlay');
-  
-  if (resizeObserverErr) {
-    resizeObserverErr.setAttribute('style', 'display: none');
-  }
-  if (resizeObserverErrDiv) {
-    resizeObserverErrDiv.setAttribute('style', 'display: none');
-  }
 
-  // Alternative: Override console.error temporarily for ResizeObserver
-  const originalError = console.error;
-  console.error = (...args) => {
-    if (typeof args[0] === 'string' && args[0].includes('ResizeObserver loop completed')) {
-      return; // Ignore ResizeObserver errors
+  // ─────────────────────────────────────────────────────────────
+  // ✅ NEW: Centralized auth guards + API wrapper
+  // ─────────────────────────────────────────────────────────────
+
+  // remove tokens helper
+  const clearLocalTokens = () => {
+    try {
+      localStorage.removeItem("accessToken");
+      localStorage.removeItem("db_token");
+    } catch {}
+  };
+
+  // check & redirect if tokens missing
+  const ensureAuthOrRedirect = (opts = { requireDB: true }) => {
+    const token = localStorage.getItem("accessToken");
+    const dbToken = localStorage.getItem("db_token");
+
+    if (!token) {
+      toast.error("Access token is missing. Redirecting to login...");
+      clearLocalTokens();
+      navigate("/login");
+      return { ok: false };
     }
-    originalError.apply(console, args);
+    if (opts.requireDB && !dbToken) {
+      toast.error("DB token is missing. Redirecting to login...");
+      clearLocalTokens();
+      navigate("/login");
+      return { ok: false };
+    }
+    return { ok: true, token, dbToken };
   };
 
-  // Cleanup
-  return () => {
-    console.error = originalError;
+  // detect token invalid JSON
+  const isInvalidTokenResponse = (json) => {
+    if (!json || typeof json !== "object") return false;
+    if (json.code === "token_not_valid") return true;
+    if (json.status === 403 && json.detail && String(json.detail).toLowerCase().includes("token")) {
+      return true;
+    }
+    if (Array.isArray(json.messages)) {
+      return json.messages.some((m) =>
+        (m?.message && String(m.message).toLowerCase().includes("token")) ||
+        (m?.token_type && String(m.token_type).toLowerCase().includes("access"))
+      );
+    }
+    return false;
   };
-}, []);
+
+  // SweetAlert for invalid token
+  const promptInvalidToken = async () => {
+    const result = await Swal.fire({
+      title: "Access token is not valid",
+      text: "Do you wish to go back to the dashboard or stay here?",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: "Go to Dashboard",
+      cancelButtonText: "Stay Here",
+    });
+    if (result.isConfirmed) {
+      navigate("/dashboard"); // or "/dashboard" if you prefer
+    }
+  };
+
+  // unified API fetcher that attaches token, checks invalid-token response, and returns json
+  const apiFetch = async (endpoint, options = {}, { attachAuth = true } = {}) => {
+    const authCheck = ensureAuthOrRedirect({ requireDB: true });
+    if (!authCheck.ok) {
+      throw new Error("Auth missing");
+    }
+    const token = authCheck.token;
+
+    const finalHeaders = {
+      "Content-Type": "application/json",
+      ...(attachAuth ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers || {}),
+    };
+
+    const res = await fetch(endpoint, { ...options, headers: finalHeaders });
+    let json = null;
+    try {
+      json = await res.json();
+    } catch {
+      // ignore parse error, handle below
+    }
+
+    if (isInvalidTokenResponse(json) || res.status === 403) {
+      await promptInvalidToken();
+      throw new Error("Token not valid");
+    }
+
+    return { res, json };
+  };
+  // ─────────────────────────────────────────────────────────────
+
+  // Add this at the top of your Home component, after the imports
+  useEffect(() => {
+    // Suppress ResizeObserver errors
+    const resizeObserverErrDiv = document.getElementById('webpack-dev-server-client-overlay-div');
+    const resizeObserverErr = document.getElementById('webpack-dev-server-client-overlay');
+    
+    if (resizeObserverErr) {
+      resizeObserverErr.setAttribute('style', 'display: none');
+    }
+    if (resizeObserverErrDiv) {
+      resizeObserverErrDiv.setAttribute('style', 'display: none');
+    }
+
+    // Alternative: Override console.error temporarily for ResizeObserver
+    const originalError = console.error;
+    console.error = (...args) => {
+      if (typeof args[0] === 'string' && args[0].includes('ResizeObserver loop completed')) {
+        return; // Ignore ResizeObserver errors
+      }
+      originalError.apply(console, args);
+    };
+
+    // Cleanup
+    return () => {
+      console.error = originalError;
+    };
+  }, []);
+
   // === Fetch tables ===
   useEffect(() => {
+    // ✅ guard: redirect if tokens missing
+    const authCheck = ensureAuthOrRedirect({ requireDB: true });
+    if (!authCheck.ok) return;
+
     setTablesLoading(true);
-    const token = localStorage.getItem("accessToken");
-    if (!token) {
-      toast.error("Auth Error: No access token found.");
-      return;
-    }
-    const dbToken = localStorage.getItem("db_token");
-    if (!dbToken) {
-      toast.error("Auth Error: No DB token found.");
-      return;
-    }
 
     // phase 1: just fetch the flat list of table names
-    fetch(`${authUrl.BASE_URL}/db_connector/tables/`, {
+    apiFetch(`${authUrl.BASE_URL}/db_connector/tables/`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ db_token: dbToken }),
+      body: JSON.stringify({ db_token: authCheck.dbToken }),
     })
-      .then((res) => {
+      .then(({ res, json }) => {
         if (!res.ok) throw new Error(`Network error: ${res.status}`);
-        return res.json();
-      })
-      .then((data) => {
-        if (data.success && Array.isArray(data.data)) {
-          // turn ["table1","table2"] into [{ name: "table1", columns: [] }, …]
-          const list = data.data.map((t) => ({ name: t, columns: [] }));
+        if (json?.success && Array.isArray(json.data)) {
+          const list = json.data.map((t) => ({ name: t, columns: [] }));
           setTables(list);
         }
       })
@@ -124,32 +205,19 @@ useEffect(() => {
 
   // === Fetch datasets ===
   useEffect(() => {
+    // ✅ guard: redirect if tokens missing
+    const authCheck = ensureAuthOrRedirect({ requireDB: true });
+    if (!authCheck.ok) return;
+
     setpageLoading(true);
-    const token = localStorage.getItem("accessToken");
-    if (!token) {
-      toast.error("Auth Error: No access token found.");
-      return;
-    }
-    const dbToken = localStorage.getItem("db_token");
-    if (!dbToken) {
-      toast.error("Auth Error: No DB token found.");
-      return;
-    }
-    fetch(`${authUrl.BASE_URL}/dataset/info/`, {
+
+    apiFetch(`${authUrl.BASE_URL}/dataset/info/`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ db_token: dbToken }),
+      body: JSON.stringify({ db_token: authCheck.dbToken }),
     })
-      .then((res) => {
+      .then(({ res, json }) => {
         if (!res.ok) throw new Error(`Network error: ${res.status}`);
-        return res.json();
-      })
-      .then((json) => {
-        // take the array from json.data (or empty array fallback)
-        setDatasets(Array.isArray(json.data) ? json.data : []);
+        setDatasets(Array.isArray(json?.data) ? json.data : []);
       })
       .catch((err) => console.error("Error fetching datasets:", err))
       .finally(() => setpageLoading(false));
@@ -189,7 +257,7 @@ useEffect(() => {
 
   const handleMouseDown = () => setIsResizing(true);
 
-  // Open modal and fetch top 50 rows
+  // Open modal and fetch top 50 rows (no auth header used here by your code)
   const handleOpenModal = (tableName) => {
     setModalTableName(tableName);
     setOpenModal("modal");
@@ -215,36 +283,31 @@ useEffect(() => {
 
   // ─────────────── ADD THIS ───────────────
   const handleTableSelect = async (tableName) => {
+    // ✅ guard: redirect if tokens missing
+    const authCheck = ensureAuthOrRedirect({ requireDB: true });
+    if (!authCheck.ok) return;
+
     setTablesLoading(true);
-    const token = localStorage.getItem("accessToken");
-    const dbToken = localStorage.getItem("db_token");
     try {
-      const res = await fetch(
+      const { res, json } = await apiFetch(
         `${authUrl.BASE_URL}/db_connector/table/metadata/`,
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ db_token: dbToken, table_name: tableName }),
+          body: JSON.stringify({ db_token: authCheck.dbToken, table_name: tableName }),
         }
       );
-      const json = await res.json();
-      if (json.success && json.data) {
-        // map Postman response into your columns shape
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (json?.success && json.data) {
         const cols = Object.entries(json.data).map(([colName, meta]) => ({
           name: colName,
           relation: meta.relation || null,
         }));
-        // update that table’s entry in state
         setTables((prev) =>
           prev.map((t) => (t.name === tableName ? { ...t, columns: cols } : t))
         );
-        // now add the table to the flow
         addTable(tableName);
       } else {
-        throw new Error(json.message || "Failed to fetch metadata");
+        throw new Error(json?.message || "Failed to fetch metadata");
       }
     } catch (err) {
       console.error("Error fetching metadata:", err);
@@ -259,11 +322,9 @@ useEffect(() => {
       ([tableName, { position, columns: selCols }]) => ({
         id: tableName,
         position,
-        // you can keep type 'default' if you like, since we're manually
-        // feeding in the JSX in data.label
         type: "default",
         data: {
-          ...nodes.find((n) => n.id === tableName)?.data, // carry over existing data
+          ...nodes.find((n) => n.id === tableName)?.data,
           search: columnSearches[tableName] || "",
           onSearchChange: handleSearchChange,
         },
@@ -366,11 +427,9 @@ useEffect(() => {
     if (column.relation) {
       const related = column.relation.replace(/\./g, "_").toLowerCase();
       if (!selectedTables[related]) {
-        // wait for its metadata + flow‐add to finish
         await handleTableSelect(related);
       }
     }
-    // now finally toggle the column selection (and build the edge)
     toggleColumn(tableName, column);
   };
 
@@ -381,12 +440,10 @@ useEffect(() => {
       if (!entry) return prev;
 
       const isSelected = entry.columns.includes(column.name);
-      // either remove or add this column
       const newCols = isSelected
         ? entry.columns.filter((c) => c !== column.name)
         : [...entry.columns, column.name];
 
-      // shallow-copy the whole map and update this table’s columns
       const updated = {
         ...prev,
         [tableName]: {
@@ -395,7 +452,6 @@ useEffect(() => {
         },
       };
 
-      // normalize relation name: e.g. "User.Profile" → "user_profile"
       if (column.relation) {
         const normalized = column.relation.replace(/\./g, "_").toLowerCase();
         const relatedTable = tables.find(
@@ -403,12 +459,10 @@ useEffect(() => {
         )?.name;
 
         if (!isSelected) {
-          // ✔️ checking: add related table if not already there
           if (relatedTable && !prev[relatedTable]) {
             handleTableSelect(relatedTable);
           }
         } else {
-          // ❌ unchecking: see if *any* other column still points here
           if (relatedTable) {
             const stillReferenced = Object.entries(updated).some(
               ([tbl, data]) =>
@@ -465,7 +519,6 @@ useEffect(() => {
     });
     setEdges(newEdges);
 
-    // regenerate nodes to include updated column lists
     const updatedNodes = Object.entries(selectedTables).map(
       ([tableName, data]) =>
         generateNode(tableName, data.position.x, data.position.y, data.columns)
@@ -501,315 +554,262 @@ useEffect(() => {
   };
 
   // Submit preview
- // Updated handleSubmit function with debugging and fixes
-const handleSubmit = async () => {
-  const output = {};
-  Object.entries(selectedTables).forEach(([tableName, data]) => {
-    const table = tables.find((t) => t.name === tableName);
-    if (!table) return;
-    const relationCols = [];
-    const regularCols = [];
-    data.columns.forEach((colName) => {
-      const col = table.columns.find((c) => c.name === colName);
-      if (col?.relation) {
-        relationCols.push({
-          [col.name]: [
-            { relation: col.relation.replace(/\./g, "_").toLowerCase() },
-          ],
-        });
-      } else {
-        regularCols.push(col.name);
-      }
-    });
-    // swapped order so strings come first
-    output[tableName] = [...regularCols, ...relationCols];
-  });
-  
-  if (Object.keys(output).length === 0) {
-    toast.error("Please select at least one table with columns");
-    return;
-  }
+  // Updated handleSubmit function with debugging and fixes
+  const handleSubmit = async () => {
+    // ✅ guard: redirect if tokens missing
+    const authCheck = ensureAuthOrRedirect({ requireDB: true });
+    if (!authCheck.ok) return;
 
-  const token = localStorage.getItem("accessToken");
-  if (!token) {
-    toast.error("Auth Error: No access token found.");
-    return;
-  }
-
-  const dbToken = localStorage.getItem("db_token");
-  if (!dbToken) {
-    toast.error("Auth Error: No DB token found.");
-    return;
-  }
-
-  const payload = { schema: output, db_token: dbToken };
-
-  // Add debugging
-  console.log("Payload being sent:", payload);
-
-  try {
-    setpageLoading(true);
-    const res = await fetch(`${authUrl.BASE_URL}/dataset/preview/`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const json = await res.json();
-    
-    // Add debugging for response
-    console.log("Full API response:", json);
-    console.log("Response status:", res.ok);
-    console.log("JSON status:", json.status);
-    console.log("JSON data:", json.data);
-
-    if (res.ok && json.status) {
-      // Try different possible data structures
-      let previewData = [];
-      
-      if (json.data?.data && Array.isArray(json.data.data)) {
-        previewData = json.data.data;
-      } else if (json.data && Array.isArray(json.data)) {
-        previewData = json.data;
-      } else if (Array.isArray(json)) {
-        previewData = json;
-      }
-
-      console.log("Preview data to set:", previewData);
-      console.log("Preview data length:", previewData.length);
-
-      setResponseData(previewData);
-      setSql(json.sql || ""); // Also set SQL if available
-      setOpenModal("response");
-
-      if (previewData.length > 0) {
-        Swal.fire(
-          "Preview Generated",
-          "success"
-        );
-      } else {
-        Swal.fire(
-          "Preview Generated",
-          "Preview generated but no data returned. Check your table selections.",
-          "warning"
-        );
-      }
-    } else {
-      console.error("API Error:", json);
-      Swal.fire(
-        "Preview Failed",
-        json.error || json.message || "Failed to generate preview",
-        "error"
-      );
-    }
-  } catch (error) {
-    console.error("Request failed:", error);
-    Swal.fire(
-      "Error",
-      error.message || "An unexpected error occurred.",
-      "error"
-    );
-  } finally {
-    setpageLoading(false);
-  }
-};
-
-// Updated handleGenerateCharts function for the new API structure
-const handleGenerateCharts = async () => {
-  // Get dataset name from user
-  const { value: name } = await Swal.fire({
-    title: "Enter Dataset name",
-    text: "Preferably provide proper name for the dataset. (Example: Sales Report)",
-    input: "text",
-    inputPlaceholder: "Dataset name...",
-    showCancelButton: true,
-    inputValidator: (value) => {
-      const regex = /^[A-Za-z0-9 ]+$/;
-      if (!value) {
-        return "Dataset name is required!";
-      } else if (!regex.test(value)) {
-        return "Only letters, numbers, and spaces are allowed.";
-      } else if (value.length > 60) {
-        return "Maximum 60 characters allowed.";
-      }
-      return null;
-    },
-  });
-
-  if (!name) return;
-
-  const confirmation = await Swal.fire({
-    title: "Are you sure?",
-    text: "Do you want to create this dataset?",
-    icon: "question",
-    showCancelButton: true,
-    confirmButtonText: "Yes, create it",
-    cancelButtonText: "No, cancel",
-  });
-  
-  if (!confirmation.isConfirmed) return;
-
-  // Build the new payload structure based on selected tables
-  const selectedColumns = {};
-  Object.entries(selectedTables).forEach(([tableName, data]) => {
-    const table = tables.find((t) => t.name === tableName);
-    if (!table) return;
-
-    const relationCols = [];
-    const regularCols = [];
-    
-    data.columns.forEach((colName) => {
-      const col = table.columns.find((c) => c.name === colName);
-      if (col?.relation) {
-        relationCols.push({
-          [col.name]: [
-            { relation: col.relation.replace(/\./g, "_").toLowerCase() },
-          ],
-        });
-      } else {
-        regularCols.push(col.name);
-      }
-    });
-    
-    // Combine regular columns and relation columns
-    selectedColumns[tableName] = [...regularCols, ...relationCols];
-  });
-
-  const token = localStorage.getItem("accessToken");
-  if (!token) {
-    toast.error("Auth Error: No access token found.");
-    return;
-  }
-
-  const dbToken = localStorage.getItem("db_token");
-  if (!dbToken) {
-    toast.error("Auth Error: No DB token found.");
-    return;
-  }
-
-  // Create the payload with the new structure
-  const payload = {
-    db_token: dbToken,
-    table_name: name.toLowerCase().replace(/\s+/g, '_'), // Convert name to table-friendly format
-    selected_columns: selectedColumns
-  };
-
-  console.log("Payload being sent to field_mapping:", payload);
-
-  try {
-    setpageLoading(true);
-    
-    // Use the new API endpoint structure
-    const res1 = await fetch(`${authUrl.BASE_URL}/dataset/field_mapping/`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const json = await res1.json();
-    console.log("API Response:", json);
-
-    if (!res1.ok) {
-      throw new Error(json.message || `HTTP error! status: ${res1.status}`);
-    }
-
-    if (json.success) {
-      // Update response data with the new data structure
-      setResponseData(json.data || []);
-      
-      // Store the SQL query if available
-      if (json.sql_query) {
-        setSql(json.sql_query);
-      }
-      
-      setOpenModal("response");
-      
-    
-      // Trigger the dataset generation with charts and KPIs
-      if (json.id && json.created_table_name) {
-        try {
-          const generatePayload = {
-            db_token: dbToken,
-            table_name: json.created_table_name
-          };
-
-          console.log("Triggering dataset generation with payload:", generatePayload);
-
-          const generateRes = await fetch(
-            `${authUrl.BASE_URL}/dataset/generate_dataset/`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`,
-              },
-              body: JSON.stringify(generatePayload),
-            }
-          );
-
-          if (generateRes.ok) {
-            const generateJson = await generateRes.json();
-            console.log("Dataset generation response:", generateJson);
-            
-            if (generateJson.success) {
-              // Update the success message with more details
-             // Show success message with more details
-      Swal.fire({
-        title: "Dataset Created Successfully!",
-       
-        icon: "success",
-        showCancelButton: true,
-        confirmButtonText: "View in Gallery",
-        cancelButtonText: "Stay Here"
-      }).then((result) => {
-        if (result.isConfirmed) {
-          navigate("/gallery");
+    const output = {};
+    Object.entries(selectedTables).forEach(([tableName, data]) => {
+      const table = tables.find((t) => t.name === tableName);
+      if (!table) return;
+      const relationCols = [];
+      const regularCols = [];
+      data.columns.forEach((colName) => {
+        const col = table.columns.find((c) => c.name === colName);
+        if (col?.relation) {
+          relationCols.push({
+            [col.name]: [
+              { relation: col.relation.replace(/\./g, "_").toLowerCase() },
+            ],
+          });
+        } else {
+          regularCols.push(col.name);
         }
       });
+      output[tableName] = [...regularCols, ...relationCols];
+    });
+
+    if (Object.keys(output).length === 0) {
+      toast.error("Please select at least one table with columns");
+      return;
+    }
+
+    const payload = { schema: output, db_token: authCheck.dbToken };
+
+    console.log("Payload being sent:", payload);
+
+    try {
+      setpageLoading(true);
+
+      const { res, json } = await apiFetch(`${authUrl.BASE_URL}/dataset/preview/`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+
+      console.log("Full API response:", json);
+      console.log("Response status:", res.ok);
+      console.log("JSON status:", json?.status);
+      console.log("JSON data:", json?.data);
+
+      if (res.ok && json?.status) {
+        let previewData = [];
+
+        if (json.data?.data && Array.isArray(json.data.data)) {
+          previewData = json.data.data;
+        } else if (json.data && Array.isArray(json.data)) {
+          previewData = json.data;
+        } else if (Array.isArray(json)) {
+          previewData = json;
+        }
+
+        console.log("Preview data to set:", previewData);
+        console.log("Preview data length:", previewData.length);
+
+        setResponseData(previewData);
+        setSql(json.sql || "");
+        setOpenModal("response");
+
+        if (previewData.length > 0) {
+          Swal.fire("Preview Generated", "success");
+        } else {
+          Swal.fire(
+            "Preview Generated",
+            "Preview generated but no data returned. Check your table selections.",
+            "warning"
+          );
+        }
+      } else {
+        console.error("API Error:", json);
+        Swal.fire(
+          "Preview Failed",
+          json?.error || json?.message || "Failed to generate preview",
+          "error"
+        );
+      }
+    } catch (error) {
+      console.error("Request failed:", error);
+      if (error.message !== "Token not valid") {
+        Swal.fire("Error", error.message || "An unexpected error occurred.", "error");
+      }
+    } finally {
+      setpageLoading(false);
+    }
+  };
+
+  // Updated handleGenerateCharts function for the new API structure
+  const handleGenerateCharts = async () => {
+    // ✅ guard: redirect if tokens missing
+    const authCheck = ensureAuthOrRedirect({ requireDB: true });
+    if (!authCheck.ok) return;
+
+    const { value: name } = await Swal.fire({
+      title: "Enter Dataset name",
+      text: "Preferably provide proper name for the dataset. (Example: Sales Report)",
+      input: "text",
+      inputPlaceholder: "Dataset name...",
+      showCancelButton: true,
+      inputValidator: (value) => {
+        const regex = /^[A-Za-z0-9 ]+$/;
+        if (!value) {
+          return "Dataset name is required!";
+        } else if (!regex.test(value)) {
+          return "Only letters, numbers, and spaces are allowed.";
+        } else if (value.length > 60) {
+          return "Maximum 60 characters allowed.";
+        }
+        return null;
+      },
+    });
+
+    if (!name) return;
+
+    const confirmation = await Swal.fire({
+      title: "Are you sure?",
+      text: "Do you want to create this dataset?",
+      icon: "question",
+      showCancelButton: true,
+      confirmButtonText: "Yes, create it",
+      cancelButtonText: "No, cancel",
+    });
+
+    if (!confirmation.isConfirmed) return;
+
+    const selectedColumns = {};
+    Object.entries(selectedTables).forEach(([tableName, data]) => {
+      const table = tables.find((t) => t.name === tableName);
+      if (!table) return;
+
+      const relationCols = [];
+      const regularCols = [];
+
+      data.columns.forEach((colName) => {
+        const col = table.columns.find((c) => c.name === colName);
+        if (col?.relation) {
+          relationCols.push({
+            [col.name]: [
+              { relation: col.relation.replace(/\./g, "_").toLowerCase() },
+            ],
+          });
+        } else {
+          regularCols.push(col.name);
+        }
+      });
+
+      selectedColumns[tableName] = [...regularCols, ...relationCols];
+    });
+
+    const payload = {
+      db_token: authCheck.dbToken,
+      table_name: name.toLowerCase().replace(/\s+/g, "_"),
+      selected_columns: selectedColumns,
+    };
+
+    console.log("Payload being sent to field_mapping:", payload);
+
+    try {
+      setpageLoading(true);
+
+      const { res: res1, json } = await apiFetch(
+        `${authUrl.BASE_URL}/dataset/field_mapping/`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        }
+      );
+
+      console.log("API Response:", json);
+
+      if (!res1.ok) {
+        throw new Error(json?.message || `HTTP error! status: ${res1.status}`);
+      }
+
+      if (json?.success) {
+        setResponseData(json.data || []);
+        if (json.sql_query) {
+          setSql(json.sql_query);
+        }
+        setOpenModal("response");
+
+        if (json.id && json.created_table_name) {
+          try {
+            const generatePayload = {
+              db_token: authCheck.dbToken,
+              table_name: json.created_table_name,
+            };
+
+            console.log("Triggering dataset generation with payload:", generatePayload);
+
+            const { res: generateRes, json: generateJson } = await apiFetch(
+              `${authUrl.BASE_URL}/dataset/generate_dataset/`,
+              {
+                method: "POST",
+                body: JSON.stringify(generatePayload),
+              }
+            );
+
+            if (generateRes.ok) {
+              console.log("Dataset generation response:", generateJson);
+
+              if (generateJson?.success) {
+                Swal.fire({
+                  title: "Dataset Created Successfully!",
+                  icon: "success",
+                  showCancelButton: true,
+                  confirmButtonText: "View in Gallery",
+                  cancelButtonText: "Stay Here",
+                }).then((result) => {
+                  if (result.isConfirmed) {
+                    navigate("/gallery");
+                  }
+                });
+              } else {
+                console.warn("Dataset generation completed but returned success: false");
+              }
             } else {
-              console.warn("Dataset generation completed but returned success: false");
+              console.warn("Dataset generation request failed:", generateRes.status);
             }
-          } else {
-            console.warn("Dataset generation request failed:", generateRes.status);
+          } catch (generateError) {
+            console.warn("Failed to trigger dataset generation:", generateError);
           }
-        } catch (generateError) {
-          console.warn("Failed to trigger dataset generation:", generateError);
-          // Don't show error to user as the main creation was successful
+        }
+      } else {
+        if (json?.message && json.message.includes("already exists")) {
+          Swal.fire({
+            title: "Name already exists!",
+            text: `Dataset with name "${name}" already exists. Please choose a different name.`,
+            icon: "warning",
+            confirmButtonText: "Ok",
+          });
+        } else {
+          throw new Error(json?.message || "Failed to create dataset");
         }
       }
-      
-    } else {
-      // Handle case where success is false
-      if (json.message && json.message.includes("already exists")) {
+    } catch (error) {
+      console.error("Error creating dataset:", error);
+      if (error.message !== "Token not valid") {
         Swal.fire({
-          title: "Name already exists!",
-          text: `Dataset with name "${name}" already exists. Please choose a different name.`,
-          icon: "warning",
+          title: "Failed to Create Dataset",
+          text: error.message || "An unexpected error occurred while creating the dataset.",
+          icon: "error",
           confirmButtonText: "Ok",
         });
-      } else {
-        throw new Error(json.message || "Failed to create dataset");
       }
+    } finally {
+      setpageLoading(false);
     }
-    
-  } catch (error) {
-    console.error("Error creating dataset:", error);
-    Swal.fire({
-      title: "Failed to Create Dataset",
-      text: error.message || "An unexpected error occurred while creating the dataset.",
-      icon: "error",
-      confirmButtonText: "Ok",
-    });
-  } finally {
-    setpageLoading(false);
-  }
-};
+  };
 
   // Filtered lists
   const filteredTables = tables.filter((t) =>
@@ -822,154 +822,37 @@ const handleGenerateCharts = async () => {
     );
 
   // Enhanced renderBottomContent function with debugging
-const renderBottomContent = () => {
-  console.log("renderBottomContent called");
-  console.log("openModal:", openModal);
-  console.log("responseData:", responseData);
-  console.log("responseData length:", responseData?.length);
+  const renderBottomContent = () => {
+    console.log("renderBottomContent called");
+    console.log("openModal:", openModal);
+    console.log("responseData:", responseData);
+    console.log("responseData length:", responseData?.length);
 
-  // 1) Dataset preview panel
-  if (
-    openModal === "dataset" &&
-    selectedDatasets &&
-    Array.isArray(selectedDatasets.data) &&
-    selectedDatasets.data.length > 0
-  ) {
-    console.log("Rendering dataset preview panel");
-    return (
-      <div style={{ height: `${bottomHeight}px` }} className="rounded">
-        <div className="w-full flex p-1 items-center justify-between">
-          <p className="text-xl">{selectedDatasets.name} Preview</p>
-          <button
-            onClick={() => setOpenModal("response")}
-            disabled={!responseData || responseData.length <= 0}
-            className="bg-pink-600 disabled:cursor-not-allowed disabled:bg-gray-500 text-white px-4 py-2 rounded shadow"
-          >
-            Show Dataset
-          </button>
-        </div>
-        <div className="overflow-auto" style={{ height: `${bottomHeight - 60}px` }}>
-          <table className="w-full mb-3 text-xs text-left border border-gray-300">
-            <thead className="bg-[#FAFAFB] border-b border-gray-300 text-gray-700 sticky top-0">
-              <tr>
-                {Object.keys(selectedDatasets.data[0]).map((key) => (
-                  <th key={key} className="px-2 py-3 whitespace-nowrap">
-                    {key}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {selectedDatasets.data.map((row, i) => (
-                <tr key={i} className="hover:bg-gray-50 border border-gray-300">
-                  {Object.values(row).map((val, j) => (
-                    <td key={j} className="px-2 py-3 whitespace-nowrap">
-                      {typeof val === "object" && val !== null
-                        ? JSON.stringify(val)
-                        : val}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    );
-  }
-
-  // 2) Response data preview - THIS IS THE IMPORTANT ONE
-  if (openModal === "response") {
-    console.log("Checking response data preview conditions");
-    console.log("responseData is array:", Array.isArray(responseData));
-    console.log("responseData length > 0:", responseData && responseData.length > 0);
-
-    if (Array.isArray(responseData) && responseData.length > 0) {
-      console.log("Rendering response data preview");
-      console.log("First row keys:", Object.keys(responseData[0]));
-      
+    // 1) Dataset preview panel
+    if (
+      openModal === "dataset" &&
+      selectedDatasets &&
+      Array.isArray(selectedDatasets.data) &&
+      selectedDatasets.data.length > 0
+    ) {
+      console.log("Rendering dataset preview panel");
       return (
         <div style={{ height: `${bottomHeight}px` }} className="rounded">
-          <div className="w-full flex p-1 items-center justify-between bg-gray-50 border-b">
-            <p className="text-xl font-semibold">Dataset Preview (Top {responseData.length} rows)</p>
+          <div className="w-full flex p-1 items-center justify-between">
+            <p className="text-xl">{selectedDatasets.name} Preview</p>
             <button
-              onClick={handleGenerateCharts}
-              disabled={!responseData || responseData.length === 0}
-              className="bg-blue-500 disabled:cursor-not-allowed disabled:bg-gray-500 text-white px-4 py-2 rounded shadow hover:bg-blue-600"
+              onClick={() => setOpenModal("response")}
+              disabled={!responseData || responseData.length <= 0}
+              className="bg-pink-600 disabled:cursor-not-allowed disabled:bg-gray-500 text-white px-4 py-2 rounded shadow"
             >
-              Generate Charts
+              Show Dataset
             </button>
           </div>
           <div className="overflow-auto" style={{ height: `${bottomHeight - 60}px` }}>
             <table className="w-full mb-3 text-xs text-left border border-gray-300">
               <thead className="bg-[#FAFAFB] border-b border-gray-300 text-gray-700 sticky top-0">
                 <tr>
-                  {Object.keys(responseData[0]).map((key) => (
-                    <th key={key} className="px-2 py-3 whitespace-nowrap font-medium">
-                      {key}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {responseData.map((row, i) => (
-                  <tr key={i} className="hover:bg-gray-50 border-b border-gray-200">
-                    {Object.values(row).map((val, j) => (
-                      <td key={j} className="px-2 py-3 whitespace-nowrap">
-                        {typeof val === "object" && val !== null
-                          ? JSON.stringify(val)
-                          : val?.toString() || "-"}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      );
-    } else {
-      console.log("Response data is empty or not an array");
-      return (
-        <div className="p-4 text-center">
-          <p className="text-gray-500 mb-2">No preview data available</p>
-          <p className="text-sm text-gray-400">
-            {!responseData ? "No data generated yet" : 
-             !Array.isArray(responseData) ? "Invalid data format received" :
-             "Empty dataset returned"}
-          </p>
-          <button
-            onClick={() => console.log("Current responseData:", responseData)}
-            className="mt-2 px-3 py-1 text-xs bg-gray-200 rounded"
-          >
-            Debug: Log Response Data
-          </button>
-        </div>
-      );
-    }
-  }
-
-  // 3) Modal showing top 50 rows
-  if (openModal === "modal") {
-    console.log("Rendering modal for table:", modalTableName);
-    return (
-      <div style={{ height: `${bottomHeight}px` }} className="relative rounded">
-        <div className="w-full flex p-1 items-center justify-between bg-gray-50 border-b">
-          <h4 className="text-2xl font-semibold">{modalTableName} - Top 50 rows</h4>
-          <button
-            onClick={() => setOpenModal("response")}
-            disabled={!responseData || responseData.length <= 0}
-            className="bg-pink-600 disabled:cursor-not-allowed disabled:bg-gray-500 text-white px-4 py-2 rounded shadow"
-          >
-            Show Dataset
-          </button>
-        </div>
-        {modalData.length > 0 ? (
-          <div className="overflow-auto" style={{ height: `${bottomHeight - 60}px` }}>
-            <table className="w-full mb-3 text-xs text-left border border-gray-300">
-              <thead className="bg-[#FAFAFB] border-b border-gray-300 text-gray-700 sticky top-0">
-                <tr>
-                  {Object.keys(modalData[0]).map((key) => (
+                  {Object.keys(selectedDatasets.data[0]).map((key) => (
                     <th key={key} className="px-2 py-3 whitespace-nowrap">
                       {key}
                     </th>
@@ -977,16 +860,13 @@ const renderBottomContent = () => {
                 </tr>
               </thead>
               <tbody>
-                {modalData.map((row, i) => (
-                  <tr
-                    key={i}
-                    className="border-b border-gray-300 hover:bg-gray-50"
-                  >
+                {selectedDatasets.data.map((row, i) => (
+                  <tr key={i} className="hover:bg-gray-50 border border-gray-300">
                     {Object.values(row).map((val, j) => (
                       <td key={j} className="px-2 py-3 whitespace-nowrap">
-                        {val !== null && val !== undefined
-                          ? val.toString()
-                          : "-"}
+                        {typeof val === "object" && val !== null
+                          ? JSON.stringify(val)
+                          : val}
                       </td>
                     ))}
                   </tr>
@@ -994,29 +874,149 @@ const renderBottomContent = () => {
               </tbody>
             </table>
           </div>
-        ) : (
-          <p className="text-sm text-gray-500 p-4">
-            No data available for this table.
-          </p>
-        )}
+        </div>
+      );
+    }
+
+    // 2) Response data preview
+    if (openModal === "response") {
+      console.log("Checking response data preview conditions");
+      console.log("responseData is array:", Array.isArray(responseData));
+      console.log("responseData length > 0:", responseData && responseData.length > 0);
+
+      if (Array.isArray(responseData) && responseData.length > 0) {
+        console.log("Rendering response data preview");
+        console.log("First row keys:", Object.keys(responseData[0]));
+
+        return (
+          <div style={{ height: `${bottomHeight}px` }} className="rounded">
+            <div className="w-full flex p-1 items-center justify-between bg-gray-50 border-b">
+              <p className="text-xl font-semibold">Dataset Preview (Top {responseData.length} rows)</p>
+              <button
+                onClick={handleGenerateCharts}
+                disabled={!responseData || responseData.length === 0}
+                className="bg-blue-500 disabled:cursor-not-allowed disabled:bg-gray-500 text-white px-4 py-2 rounded shadow hover:bg-blue-600"
+              >
+                Generate Charts
+              </button>
+            </div>
+            <div className="overflow-auto" style={{ height: `${bottomHeight - 60}px` }}>
+              <table className="w-full mb-3 text-xs text-left border border-gray-300">
+                <thead className="bg-[#FAFAFB] border-b border-gray-300 text-gray-700 sticky top-0">
+                  <tr>
+                    {Object.keys(responseData[0]).map((key) => (
+                      <th key={key} className="px-2 py-3 whitespace-nowrap font-medium">
+                        {key}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {responseData.map((row, i) => (
+                    <tr key={i} className="hover:bg-gray-50 border-b border-gray-200">
+                      {Object.values(row).map((val, j) => (
+                        <td key={j} className="px-2 py-3 whitespace-nowrap">
+                          {typeof val === "object" && val !== null
+                            ? JSON.stringify(val)
+                            : val?.toString() || "-"}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      } else {
+        console.log("Response data is empty or not an array");
+        return (
+          <div className="p-4 text-center">
+            <p className="text-gray-500 mb-2">No preview data available</p>
+            <p className="text-sm text-gray-400">
+              {!responseData ? "No data generated yet" : 
+               !Array.isArray(responseData) ? "Invalid data format received" :
+               "Empty dataset returned"}
+            </p>
+            <button
+              onClick={() => console.log("Current responseData:", responseData)}
+              className="mt-2 px-3 py-1 text-xs bg-gray-200 rounded"
+            >
+              Debug: Log Response Data
+            </button>
+          </div>
+        );
+      }
+    }
+
+    // 3) Modal showing top 50 rows
+    if (openModal === "modal") {
+      console.log("Rendering modal for table:", modalTableName);
+      return (
+        <div style={{ height: `${bottomHeight}px` }} className="relative rounded">
+          <div className="w-full flex p-1 items-center justify-between bg-gray-50 border-b">
+            <h4 className="text-2xl font-semibold">{modalTableName} - Top 50 rows</h4>
+            <button
+              onClick={() => setOpenModal("response")}
+              disabled={!responseData || responseData.length <= 0}
+              className="bg-pink-600 disabled:cursor-not-allowed disabled:bg-gray-500 text-white px-4 py-2 rounded shadow"
+            >
+              Show Dataset
+            </button>
+          </div>
+          {modalData.length > 0 ? (
+            <div className="overflow-auto" style={{ height: `${bottomHeight - 60}px` }}>
+              <table className="w-full mb-3 text-xs text-left border border-gray-300">
+                <thead className="bg-[#FAFAFB] border-b border-gray-300 text-gray-700 sticky top-0">
+                  <tr>
+                    {Object.keys(modalData[0]).map((key) => (
+                      <th key={key} className="px-2 py-3 whitespace-nowrap">
+                        {key}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {modalData.map((row, i) => (
+                    <tr
+                      key={i}
+                      className="border-b border-gray-300 hover:bg-gray-50"
+                    >
+                      {Object.values(row).map((val, j) => (
+                        <td key={j} className="px-2 py-3 whitespace-nowrap">
+                          {val !== null && val !== undefined
+                            ? val.toString()
+                            : "-"}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500 p-4">
+              No data available for this table.
+            </p>
+          )}
+        </div>
+      );
+    }
+
+    // 4) Default placeholder
+    console.log("Rendering default placeholder");
+    return (
+      <div className="p-4 text-gray-500 text-center">
+        <p className="mb-2">No preview available</p>
+        <p className="text-sm">Generate a dataset, select one to preview, or click a table in the flow above to see its top 50 rows.</p>
+        <div className="mt-4 text-xs text-gray-400">
+          <p>Current state:</p>
+          <p>openModal: {openModal}</p>
+          <p>responseData length: {responseData?.length || 0}</p>
+        </div>
       </div>
     );
-  }
-
-  // 4) Default placeholder
-  console.log("Rendering default placeholder");
-  return (
-    <div className="p-4 text-gray-500 text-center">
-      <p className="mb-2">No preview available</p>
-      <p className="text-sm">Generate a dataset, select one to preview, or click a table in the flow above to see its top 50 rows.</p>
-      <div className="mt-4 text-xs text-gray-400">
-        <p>Current state:</p>
-        <p>openModal: {openModal}</p>
-        <p>responseData length: {responseData?.length || 0}</p>
-      </div>
-    </div>
-  );
-};
+  };
 
   function extendValidity() {
     Swal.fire({

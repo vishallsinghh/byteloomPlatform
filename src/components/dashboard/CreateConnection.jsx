@@ -91,8 +91,10 @@ export default function CreateConnection() {
       setError("Access token missing.");
       setStatus("error");
       toast.error("Auth Error: No access token found.");
+      setTimeout(() => navigate("/login"), 2000);
       return;
     }
+
 
     const payload = {
       host: formData.host,
@@ -103,7 +105,7 @@ export default function CreateConnection() {
     };
 
     try {
-      const res = await fetch(`${authUrl.BASE_URL}/ai/get-db-token/`, {
+      const res = await fetch(`${authUrl.BASE_URL}/db_connector/get-db-token/`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -145,6 +147,7 @@ export default function CreateConnection() {
     const token = localStorage.getItem("accessToken");
     if (!token) {
       toast.error("Auth Error: No access token found.");
+      setTimeout(() => navigate("/login"), 2000);
       return;
     }
 
@@ -156,8 +159,7 @@ export default function CreateConnection() {
       database: formData.database,
     };
 
-    
-
+  
     try {
       const res = await fetch(`${authUrl.BASE_URL}/ai/get-db-token/`, {
         method: "POST",
