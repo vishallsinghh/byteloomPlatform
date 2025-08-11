@@ -112,7 +112,7 @@ export default function DatabaseConnections() {
     }
     try {
       const res = await fetch(
-        `${authUrl.BASE_URL}/ai/connections/${dbToken}`,
+        `${authUrl.BASE_URL}/db_connector/connections/${dbToken}`,
         {
           method: "DELETE",
           headers: {
