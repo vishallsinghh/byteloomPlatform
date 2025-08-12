@@ -16,6 +16,7 @@ import {
   FiRefreshCw,
   FiX,
   FiSettings,
+  FiCpu,
 } from "react-icons/fi";
 import "reactflow/dist/style.css";
 import Navbar from "../components/Navbar";
@@ -43,13 +44,17 @@ function Home() {
   const [bottomHeight, setBottomHeight] = useState(100);
   const [isResizing, setIsResizing] = useState(false);
   const [responseData, setResponseData] = useState([]);
-
+  const [selectedReport, setSelectedReport] = useState(null); // 'sales' | 'inventory' | null
   const [selectedIndex, setSelectedIndex] = useState(null);
   const [selectedDatasets, setSelectedDatasets] = useState(null);
   const [activePanel, setActivePanel] = useState(null); // 'tables' | 'datasets' | null
   const [settingsPanel, setSettingsPanel] = useState(false);
   const [validityLeft, setValidityLeft] = useState();
   const [valid, setValid] = useState(true);
+
+  const [presetKeys, setPresetKeys] = useState([]);      // string[]
+const [presetsLoading, setPresetsLoading] = useState(false);
+const [presetsError, setPresetsError] = useState(null);
 
   // Separate search terms
   const [tablesSearch, setTablesSearch] = useState("");
@@ -93,13 +98,19 @@ function Home() {
   const isInvalidTokenResponse = (json) => {
     if (!json || typeof json !== "object") return false;
     if (json.code === "token_not_valid") return true;
-    if (json.status === 403 && json.detail && String(json.detail).toLowerCase().includes("token")) {
+    if (
+      json.status === 403 &&
+      json.detail &&
+      String(json.detail).toLowerCase().includes("token")
+    ) {
       return true;
     }
     if (Array.isArray(json.messages)) {
-      return json.messages.some((m) =>
-        (m?.message && String(m.message).toLowerCase().includes("token")) ||
-        (m?.token_type && String(m.token_type).toLowerCase().includes("access"))
+      return json.messages.some(
+        (m) =>
+          (m?.message && String(m.message).toLowerCase().includes("token")) ||
+          (m?.token_type &&
+            String(m.token_type).toLowerCase().includes("access"))
       );
     }
     return false;
@@ -121,7 +132,11 @@ function Home() {
   };
 
   // unified API fetcher that attaches token, checks invalid-token response, and returns json
-  const apiFetch = async (endpoint, options = {}, { attachAuth = true } = {}) => {
+  const apiFetch = async (
+    endpoint,
+    options = {},
+    { attachAuth = true } = {}
+  ) => {
     const authCheck = ensureAuthOrRedirect({ requireDB: true });
     if (!authCheck.ok) {
       throw new Error("Auth missing");
@@ -151,23 +166,65 @@ function Home() {
   };
   // ─────────────────────────────────────────────────────────────
 
+  // fetch presets keys
+  useEffect(() => {
+  if (activePanel === "agent") {
+    setPresetsLoading(true);
+    setPresetsError(null);
+    fetch("https://demo.techfinna.com/api/datasets/presets/")
+      .then((r) => r.json())
+      .then((d) => {
+        const keys =
+          Array.isArray(d?.presets) ? d.presets.map((p) => p.key).filter(Boolean) : [];
+        setPresetKeys(keys);
+      })
+      .catch((err) => {
+        console.error("Failed to load presets:", err);
+        setPresetsError("Failed to load presets");
+        setPresetKeys([]);
+      })
+      .finally(() => setPresetsLoading(false));
+  }
+}, [activePanel]);
+
+// fetch preset key data tables
+const fetchPresetDetails = (key) => {
+  console.log("Fetching preset:", key);
+  fetch(`https://demo.techfinna.com/api/datasets/presets/${encodeURIComponent(key)}`)
+    .then((r) => r.json())
+    .then((d) => {
+      console.log("Preset response:", d);
+    })
+    .catch((err) => {
+      console.error("Preset fetch failed:", err);
+      toast.error("Failed to fetch preset details");
+    });
+};
+
   // Add this at the top of your Home component, after the imports
   useEffect(() => {
     // Suppress ResizeObserver errors
-    const resizeObserverErrDiv = document.getElementById('webpack-dev-server-client-overlay-div');
-    const resizeObserverErr = document.getElementById('webpack-dev-server-client-overlay');
-    
+    const resizeObserverErrDiv = document.getElementById(
+      "webpack-dev-server-client-overlay-div"
+    );
+    const resizeObserverErr = document.getElementById(
+      "webpack-dev-server-client-overlay"
+    );
+
     if (resizeObserverErr) {
-      resizeObserverErr.setAttribute('style', 'display: none');
+      resizeObserverErr.setAttribute("style", "display: none");
     }
     if (resizeObserverErrDiv) {
-      resizeObserverErrDiv.setAttribute('style', 'display: none');
+      resizeObserverErrDiv.setAttribute("style", "display: none");
     }
 
     // Alternative: Override console.error temporarily for ResizeObserver
     const originalError = console.error;
     console.error = (...args) => {
-      if (typeof args[0] === 'string' && args[0].includes('ResizeObserver loop completed')) {
+      if (
+        typeof args[0] === "string" &&
+        args[0].includes("ResizeObserver loop completed")
+      ) {
         return; // Ignore ResizeObserver errors
       }
       originalError.apply(console, args);
@@ -293,7 +350,10 @@ function Home() {
         `${authUrl.BASE_URL}/db_connector/table/metadata/`,
         {
           method: "POST",
-          body: JSON.stringify({ db_token: authCheck.dbToken, table_name: tableName }),
+          body: JSON.stringify({
+            db_token: authCheck.dbToken,
+            table_name: tableName,
+          }),
         }
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -537,6 +597,30 @@ function Home() {
     }));
   }, []);
 
+  const handleAIAgent = async () => {
+    const { value: report } = await Swal.fire({
+      title: "AI Agent",
+      text: "Choose a report to generate",
+      input: "radio",
+      inputOptions: {
+        sales: "Sales Report",
+        inventory: "Inventory Report",
+      },
+      inputValidator: (v) => (!v ? "Please choose a report" : undefined),
+      confirmButtonText: "Continue",
+      showCancelButton: true,
+    });
+
+    if (report) {
+      // You can branch your logic here
+      // e.g., navigate(`/agent/${report}`) or trigger an API
+      toast.info(
+        report === "sales"
+          ? "Sales Report selected"
+          : "Inventory Report selected"
+      );
+    }
+  };
   // Reset everything
   const handleReset = () => {
     setSelectedTables({});
@@ -593,10 +677,13 @@ function Home() {
     try {
       setpageLoading(true);
 
-      const { res, json } = await apiFetch(`${authUrl.BASE_URL}/dataset/preview/`, {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
+      const { res, json } = await apiFetch(
+        `${authUrl.BASE_URL}/dataset/preview/`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        }
+      );
 
       console.log("Full API response:", json);
       console.log("Response status:", res.ok);
@@ -641,7 +728,11 @@ function Home() {
     } catch (error) {
       console.error("Request failed:", error);
       if (error.message !== "Token not valid") {
-        Swal.fire("Error", error.message || "An unexpected error occurred.", "error");
+        Swal.fire(
+          "Error",
+          error.message || "An unexpected error occurred.",
+          "error"
+        );
       }
     } finally {
       setpageLoading(false);
@@ -749,7 +840,10 @@ function Home() {
               table_name: json.created_table_name,
             };
 
-            console.log("Triggering dataset generation with payload:", generatePayload);
+            console.log(
+              "Triggering dataset generation with payload:",
+              generatePayload
+            );
 
             const { res: generateRes, json: generateJson } = await apiFetch(
               `${authUrl.BASE_URL}/dataset/generate_dataset/`,
@@ -775,13 +869,21 @@ function Home() {
                   }
                 });
               } else {
-                console.warn("Dataset generation completed but returned success: false");
+                console.warn(
+                  "Dataset generation completed but returned success: false"
+                );
               }
             } else {
-              console.warn("Dataset generation request failed:", generateRes.status);
+              console.warn(
+                "Dataset generation request failed:",
+                generateRes.status
+              );
             }
           } catch (generateError) {
-            console.warn("Failed to trigger dataset generation:", generateError);
+            console.warn(
+              "Failed to trigger dataset generation:",
+              generateError
+            );
           }
         }
       } else {
@@ -801,7 +903,9 @@ function Home() {
       if (error.message !== "Token not valid") {
         Swal.fire({
           title: "Failed to Create Dataset",
-          text: error.message || "An unexpected error occurred while creating the dataset.",
+          text:
+            error.message ||
+            "An unexpected error occurred while creating the dataset.",
           icon: "error",
           confirmButtonText: "Ok",
         });
@@ -848,7 +952,10 @@ function Home() {
               Show Dataset
             </button>
           </div>
-          <div className="overflow-auto" style={{ height: `${bottomHeight - 60}px` }}>
+          <div
+            className="overflow-auto"
+            style={{ height: `${bottomHeight - 60}px` }}
+          >
             <table className="w-full mb-3 text-xs text-left border border-gray-300">
               <thead className="bg-[#FAFAFB] border-b border-gray-300 text-gray-700 sticky top-0">
                 <tr>
@@ -861,7 +968,10 @@ function Home() {
               </thead>
               <tbody>
                 {selectedDatasets.data.map((row, i) => (
-                  <tr key={i} className="hover:bg-gray-50 border border-gray-300">
+                  <tr
+                    key={i}
+                    className="hover:bg-gray-50 border border-gray-300"
+                  >
                     {Object.values(row).map((val, j) => (
                       <td key={j} className="px-2 py-3 whitespace-nowrap">
                         {typeof val === "object" && val !== null
@@ -880,18 +990,16 @@ function Home() {
 
     // 2) Response data preview
     if (openModal === "response") {
-      console.log("Checking response data preview conditions");
-      console.log("responseData is array:", Array.isArray(responseData));
-      console.log("responseData length > 0:", responseData && responseData.length > 0);
+     
 
       if (Array.isArray(responseData) && responseData.length > 0) {
-        console.log("Rendering response data preview");
-        console.log("First row keys:", Object.keys(responseData[0]));
 
         return (
           <div style={{ height: `${bottomHeight}px` }} className="rounded">
             <div className="w-full flex p-1 items-center justify-between bg-gray-50 border-b">
-              <p className="text-xl font-semibold">Dataset Preview (Top {responseData.length} rows)</p>
+              <p className="text-xl font-semibold">
+                Dataset Preview (Top {responseData.length} rows)
+              </p>
               <button
                 onClick={handleGenerateCharts}
                 disabled={!responseData || responseData.length === 0}
@@ -900,12 +1008,18 @@ function Home() {
                 Generate Charts
               </button>
             </div>
-            <div className="overflow-auto" style={{ height: `${bottomHeight - 60}px` }}>
+            <div
+              className="overflow-auto"
+              style={{ height: `${bottomHeight - 60}px` }}
+            >
               <table className="w-full mb-3 text-xs text-left border border-gray-300">
                 <thead className="bg-[#FAFAFB] border-b border-gray-300 text-gray-700 sticky top-0">
                   <tr>
                     {Object.keys(responseData[0]).map((key) => (
-                      <th key={key} className="px-2 py-3 whitespace-nowrap font-medium">
+                      <th
+                        key={key}
+                        className="px-2 py-3 whitespace-nowrap font-medium"
+                      >
                         {key}
                       </th>
                     ))}
@@ -913,7 +1027,10 @@ function Home() {
                 </thead>
                 <tbody>
                   {responseData.map((row, i) => (
-                    <tr key={i} className="hover:bg-gray-50 border-b border-gray-200">
+                    <tr
+                      key={i}
+                      className="hover:bg-gray-50 border-b border-gray-200"
+                    >
                       {Object.values(row).map((val, j) => (
                         <td key={j} className="px-2 py-3 whitespace-nowrap">
                           {typeof val === "object" && val !== null
@@ -934,9 +1051,11 @@ function Home() {
           <div className="p-4 text-center">
             <p className="text-gray-500 mb-2">No preview data available</p>
             <p className="text-sm text-gray-400">
-              {!responseData ? "No data generated yet" : 
-               !Array.isArray(responseData) ? "Invalid data format received" :
-               "Empty dataset returned"}
+              {!responseData
+                ? "No data generated yet"
+                : !Array.isArray(responseData)
+                ? "Invalid data format received"
+                : "Empty dataset returned"}
             </p>
             <button
               onClick={() => console.log("Current responseData:", responseData)}
@@ -953,9 +1072,14 @@ function Home() {
     if (openModal === "modal") {
       console.log("Rendering modal for table:", modalTableName);
       return (
-        <div style={{ height: `${bottomHeight}px` }} className="relative rounded">
+        <div
+          style={{ height: `${bottomHeight}px` }}
+          className="relative rounded"
+        >
           <div className="w-full flex p-1 items-center justify-between bg-gray-50 border-b">
-            <h4 className="text-2xl font-semibold">{modalTableName} - Top 50 rows</h4>
+            <h4 className="text-2xl font-semibold">
+              {modalTableName} - Top 50 rows
+            </h4>
             <button
               onClick={() => setOpenModal("response")}
               disabled={!responseData || responseData.length <= 0}
@@ -965,7 +1089,10 @@ function Home() {
             </button>
           </div>
           {modalData.length > 0 ? (
-            <div className="overflow-auto" style={{ height: `${bottomHeight - 60}px` }}>
+            <div
+              className="overflow-auto"
+              style={{ height: `${bottomHeight - 60}px` }}
+            >
               <table className="w-full mb-3 text-xs text-left border border-gray-300">
                 <thead className="bg-[#FAFAFB] border-b border-gray-300 text-gray-700 sticky top-0">
                   <tr>
@@ -1008,7 +1135,10 @@ function Home() {
     return (
       <div className="p-4 text-gray-500 text-center">
         <p className="mb-2">No preview available</p>
-        <p className="text-sm">Generate a dataset, select one to preview, or click a table in the flow above to see its top 50 rows.</p>
+        <p className="text-sm">
+          Generate a dataset, select one to preview, or click a table in the
+          flow above to see its top 50 rows.
+        </p>
         <div className="mt-4 text-xs text-gray-400">
           <p>Current state:</p>
           <p>openModal: {openModal}</p>
@@ -1070,6 +1200,20 @@ function Home() {
             </button>
             <span className="text-[10px]">Datasets</span>
           </div>
+          <div className="flex flex-col items-center">
+            <button
+              onClick={() =>
+                setActivePanel((prev) => (prev === "agent" ? null : "agent"))
+              }
+              className={`p-2 rounded hover:bg-gray-200 ${
+                activePanel === "agent" ? "bg-gray-200" : ""
+              }`}
+              title="AI Agent"
+            >
+              <FiCpu size={20} className="text-gray-600" />
+            </button>
+            <span className="text-[10px]">AI Agent</span>
+          </div>
           <div className="flex-1"></div>
           <div className="flex flex-col items-center">
             <button
@@ -1108,7 +1252,11 @@ function Home() {
             >
               <div className="flex items-center justify-between p-4 border-b border-gray-200">
                 <p className="text-lg font-medium text-gray-800">
-                  {activePanel === "tables" ? "Tables" : "Datasets"}
+                  {activePanel === "tables"
+                    ? "Tables"
+                    : activePanel === "datasets"
+                    ? "Datasets"
+                    : "AI Agent"}
                 </p>
                 <button
                   onClick={() => setActivePanel(null)}
@@ -1126,7 +1274,7 @@ function Home() {
                     onChange={(e) => setTablesSearch(e.target.value)}
                     className="w-full px-2 py-1 text-sm border border-gray-300 rounded"
                   />
-                ) : (
+                ) : activePanel === "datasets" ? (
                   <input
                     type="text"
                     placeholder="Search datasets..."
@@ -1134,6 +1282,10 @@ function Home() {
                     onChange={(e) => setDatasetsSearch(e.target.value)}
                     className="w-full px-2 py-1 text-sm border border-gray-300 rounded"
                   />
+                ) : (
+                  <div className="text-sm text-gray-500">
+                    Choose a report type below.
+                  </div>
                 )}
               </div>
               <div className="p-2 overflow-y-auto flex-1 scrollsettings">
@@ -1217,6 +1369,92 @@ function Home() {
                     )}
                   </div>
                 )}
+
+                {activePanel === "agent" && (
+  <div className="space-y-3">
+    <div className="p-3 border border-gray-200 rounded">
+      <p className="text-sm mb-2">Select a preset</p>
+
+      {presetsLoading && (
+        <div className="space-y-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-7 rounded bg-gray-100 animate-pulse" />
+          ))}
+        </div>
+      )}
+
+      {!presetsLoading && presetsError && (
+        <div className="text-sm text-red-600">
+          {presetsError}
+          <button
+            onClick={() => {
+              setPresetsLoading(true);
+              setPresetsError(null);
+              fetch("https://demo.techfinna.com/api/datasets/presets/")
+                .then((r) => r.json())
+                .then((d) => {
+                  const keys =
+                    Array.isArray(d?.presets) ? d.presets.map((p) => p.key).filter(Boolean) : [];
+                  setPresetKeys(keys);
+                })
+                .catch((err) => {
+                  console.error("Failed to load presets:", err);
+                  setPresetsError("Failed to load presets");
+                  setPresetKeys([]);
+                })
+                .finally(() => setPresetsLoading(false));
+            }}
+            className="ml-2 px-2 py-1 text-xs bg-gray-200 rounded"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {!presetsLoading && !presetsError && presetKeys.length === 0 && (
+        <div className="text-sm text-gray-500">No presets found.</div>
+      )}
+
+      {!presetsLoading && !presetsError && presetKeys.length > 0 && (
+        <div className="space-y-1">
+          {presetKeys.map((k) => (
+            <label
+              key={k}
+              className="flex items-center gap-2 py-1 cursor-pointer hover:bg-gray-50 rounded px-2"
+            >
+              <input
+                type="radio"
+                name="agent-report"
+                value={k}
+                checked={selectedReport === k}
+                onChange={() => setSelectedReport(k)}
+              />
+              <span className="truncate">{k}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+
+    <button
+      onClick={() => {
+        if (!selectedReport) {
+          toast.error("Please choose a preset");
+          return;
+        }
+        // TODO: wire your navigation/API call here using `selectedReport`
+        toast.info(`Preset selected: ${selectedReport}`);
+        fetchPresetDetails(selectedReport);
+        setActivePanel(null);
+      }}
+      className="w-full bg-blue-600 text-white px-3 py-2 rounded shadow disabled:bg-gray-400"
+      disabled={!selectedReport}
+    >
+      Continue
+    </button>
+  </div>
+)}
+
               </div>
             </div>
           </div>

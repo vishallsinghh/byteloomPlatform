@@ -159,9 +159,8 @@ export default function CreateConnection() {
       database: formData.database,
     };
 
-  
     try {
-      const res = await fetch(`${authUrl.BASE_URL}/ai/get-db-token/`, {
+      const res = await fetch(`${authUrl.BASE_URL}/db_connector/get-db-token/`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -174,7 +173,6 @@ export default function CreateConnection() {
         const result = await res.json();
         // store the permanent db_token
         localStorage.setItem("db_token", result.data.db_token);
-        console.log("Stored db_token:", result.data.db_token);
         toast.success("Connection Created! Redirecting…");
         setTimeout(() => navigate("/create-dataset"), 2000);
       } else {
