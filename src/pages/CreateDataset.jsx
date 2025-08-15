@@ -59,9 +59,98 @@ const [presetsError, setPresetsError] = useState(null);
   // Separate search terms
   const [tablesSearch, setTablesSearch] = useState("");
   const [datasetsSearch, setDatasetsSearch] = useState("");
+const [isAIProcessing, setIsAIProcessing] = useState(false);
+const [currentAIStep, setCurrentAIStep] = useState(0); // 0 idle, 1 processing, 2 done
+const [aiTargetTable, setAiTargetTable] = useState(null); // table name to highlight
+const [aiLoaderMessage, setAiLoaderMessage] = useState("");
 
   const resizerRef = useRef(null);
+// Add this ref to track tables state changes
+const tablesRef = useRef(tables);
+useEffect(() => {
+  tablesRef.current = tables;
+}, [tables]);
 
+const waitForTables = () =>
+  new Promise((resolve) => {
+    if (tablesRef.current && tablesRef.current.length > 0) return resolve();
+    const start = Date.now();
+    const timer = setInterval(() => {
+      if (
+        (tablesRef.current && tablesRef.current.length > 0) ||
+        Date.now() - start > 10000 // 10 second timeout
+      ) {
+        clearInterval(timer);
+        resolve();
+      }
+    }, 200);
+  });
+
+  // Main automation function for step 1
+const simulateAITableSelectionFromPreset = async (presetKey) => {
+  try {
+    setIsAIProcessing(true);
+    setCurrentAIStep(1);
+    setAiLoaderMessage("Fetching preset details...");
+
+    // 1) Fetch preset details
+    const response = await fetch(
+      `https://demo.techfinna.com/api/datasets/presets/${encodeURIComponent(presetKey)}`
+    );
+    const data = await response.json();
+    console.log("Preset response:", data);
+
+    if (!data.schema || typeof data.schema !== 'object') {
+      toast.error("Invalid preset schema received");
+      return;
+    }
+
+    // 2) Pick primary table (first key in schema)
+    const primaryTable = Object.keys(data.schema)[0];
+    if (!primaryTable) {
+      toast.error("No table found in preset schema");
+      return;
+    }
+
+    // 3) Visual guidance - highlight Tables panel and set search
+    setAiLoaderMessage(`Locating table: ${primaryTable}...`);
+    setAiTargetTable(primaryTable);
+    setActivePanel("tables");
+    
+    // ✨ NEW: Automatically set the search field to the primary table name
+    setTablesSearch(primaryTable);
+    
+    await new Promise((r) => setTimeout(r, 1200)); // Visual delay
+
+    // 4) Wait for base tables list to be loaded
+    setAiLoaderMessage("Loading tables list...");
+    await waitForTables();
+    await new Promise((r) => setTimeout(r, 800));
+
+    // 5) Programmatically select the table
+    setAiLoaderMessage(`Loading ${primaryTable} metadata...`);
+    await handleTableSelect(primaryTable);
+    await new Promise((r) => setTimeout(r, 1000));
+
+    // 6) Completion
+    setAiLoaderMessage("Step 1 completed successfully!");
+    setCurrentAIStep(2);
+    await new Promise((r) => setTimeout(r, 800));
+
+    toast.success("AI automation step 1 completed successfully!", { autoClose: 3000 });
+    
+  } catch (error) {
+    console.error("AI selection failed:", error);
+    toast.error("Failed to automate table selection");
+  } finally {
+    setIsAIProcessing(false);
+    setCurrentAIStep(0);
+    setAiTargetTable(null);
+    setTablesSearch(""); // Clear search after automation
+    setAiLoaderMessage("");
+    setActivePanel(null);
+  }
+};
   // ─────────────────────────────────────────────────────────────
   // ✅ NEW: Centralized auth guards + API wrapper
   // ─────────────────────────────────────────────────────────────
@@ -927,10 +1016,7 @@ const fetchPresetDetails = (key) => {
 
   // Enhanced renderBottomContent function with debugging
   const renderBottomContent = () => {
-    console.log("renderBottomContent called");
-    console.log("openModal:", openModal);
-    console.log("responseData:", responseData);
-    console.log("responseData length:", responseData?.length);
+    
 
     // 1) Dataset preview panel
     if (
@@ -1046,7 +1132,6 @@ const fetchPresetDetails = (key) => {
           </div>
         );
       } else {
-        console.log("Response data is empty or not an array");
         return (
           <div className="p-4 text-center">
             <p className="text-gray-500 mb-2">No preview data available</p>
@@ -1267,71 +1352,107 @@ const fetchPresetDetails = (key) => {
               </div>
               <div className="p-2 border-b border-gray-200">
                 {activePanel === "tables" ? (
-                  <input
-                    type="text"
-                    placeholder="Search tables..."
-                    value={tablesSearch}
-                    onChange={(e) => setTablesSearch(e.target.value)}
-                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded"
-                  />
-                ) : activePanel === "datasets" ? (
-                  <input
-                    type="text"
-                    placeholder="Search datasets..."
-                    value={datasetsSearch}
-                    onChange={(e) => setDatasetsSearch(e.target.value)}
-                    className="w-full px-2 py-1 text-sm border border-gray-300 rounded"
-                  />
-                ) : (
-                  <div className="text-sm text-gray-500">
-                    Choose a report type below.
-                  </div>
-                )}
+  <div className="relative">
+    <input
+      type="text"
+      placeholder="Search tables..."
+      value={tablesSearch}
+      onChange={(e) => setTablesSearch(e.target.value)}
+      className={`w-full px-2 py-1 text-sm border rounded transition-all duration-300 ${
+        isAIProcessing && currentAIStep === 1 && aiTargetTable
+          ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200 animate-pulse'
+          : 'border-gray-300'
+      }`}
+      disabled={isAIProcessing}
+    />
+    {isAIProcessing && currentAIStep === 1 && aiTargetTable && (
+      <div className="absolute right-2 top-1/2 transform -translate-y-1/2">
+        <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    )}
+  </div>
+) : activePanel === "datasets" ? (
+  <input
+    type="text"
+    placeholder="Search datasets..."
+    value={datasetsSearch}
+    onChange={(e) => setDatasetsSearch(e.target.value)}
+    className="w-full px-2 py-1 text-sm border border-gray-300 rounded"
+  />
+) : (
+  <div className="text-sm text-gray-500">
+    Choose a report type below.
+  </div>
+)}
               </div>
               <div className="p-2 overflow-y-auto flex-1 scrollsettings">
-                {activePanel === "tables" && (
-                  <div className="space-y-2">
-                    {tablesLoading ? (
-                      <div className="space-y-3 animate-pulse">
-                        {Array.from({ length: 6 }).map((_, i) => (
-                          <div
-                            key={i}
-                            className="mx-auto w-full border p-4 border-gray-200 rounded-md"
-                          >
-                            <div className="flex space-x-4">
-                              <div className="h-6 w-6 rounded-full bg-gray-200"></div>
-                              <div className="flex-1 space-y-2 py-1">
-                                <div className="h-2 rounded bg-gray-200"></div>
-                                <div className="h-2 rounded bg-gray-200 w-5/6"></div>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : filteredTables.length === 0 ? (
-                      <div className="p-4 text-gray-400">
-                        {tables.length === 0
-                          ? "No tables available"
-                          : "No tables match your search"}
-                      </div>
-                    ) : (
-                      filteredTables.map((table) => (
-                        <label
-                          key={table.name}
-                          className="flex px-2 py-2 cursor-pointer justify-between items-center rounded hover:bg-gray-100"
-                        >
-                          <span className="truncate">{table.name}</span>
-                          <input
-                            type="checkbox"
-                            checked={!!selectedTables[table.name]}
-                            disabled={Object.keys(selectedTables).length > 0}
-                            onChange={() => handleTableSelect(table.name)}
-                          />
-                        </label>
-                      ))
-                    )}
-                  </div>
-                )}
+{activePanel === "tables" && (
+  <div className="space-y-2">
+    {tablesLoading ? (
+      <div className="space-y-3 animate-pulse">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div
+            key={i}
+            className="mx-auto w-full border p-4 border-gray-200 rounded-md"
+          >
+            <div className="flex space-x-4">
+              <div className="h-6 w-6 rounded-full bg-gray-200"></div>
+              <div className="flex-1 space-y-2 py-1">
+                <div className="h-2 rounded bg-gray-200"></div>
+                <div className="h-2 rounded bg-gray-200 w-5/6"></div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    ) : filteredTables.length === 0 ? (
+      <div className="p-4 text-gray-400">
+        {tables.length === 0
+          ? "No tables available"
+          : "No tables match your search"}
+      </div>
+    ) : (
+      filteredTables.map((table) => {
+        const isAITarget = isAIProcessing && aiTargetTable === table.name;
+        const isSelected = !!selectedTables[table.name];
+        
+        return (
+          <label
+            key={table.name}
+            className={`flex px-2 py-2 cursor-pointer justify-between items-center rounded transition-all duration-300 ${
+              isAITarget
+                ? 'bg-blue-100 border-2 border-blue-400 shadow-md animate-pulse'
+                : isSelected
+                ? 'bg-green-100 border border-green-300'
+                : 'hover:bg-gray-100'
+            }`}
+          >
+            <span className={`truncate ${isAITarget ? 'text-blue-700 font-semibold' : ''}`}>
+              {table.name}
+              {isAITarget && (
+                <span className="ml-2 text-xs text-blue-600 animate-bounce">
+                  ← AI Selecting
+                </span>
+              )}
+            </span>
+            <div className="flex items-center gap-2">
+              {isAITarget && (
+                <div className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+              )}
+              <input
+                type="checkbox"
+                checked={isSelected}
+                disabled={Object.keys(selectedTables).length > 0 || isAIProcessing}
+                onChange={() => handleTableSelect(table.name)}
+                className={isAITarget ? 'accent-blue-500' : ''}
+              />
+            </div>
+          </label>
+        );
+      })
+    )}
+  </div>
+)}
 
                 {activePanel === "datasets" && (
                   <div className="space-y-2">
@@ -1437,17 +1558,19 @@ const fetchPresetDetails = (key) => {
     </div>
 
     <button
-      onClick={() => {
+      onClick={async () => {
         if (!selectedReport) {
           toast.error("Please choose a preset");
           return;
         }
         // TODO: wire your navigation/API call here using `selectedReport`
-        toast.info(`Preset selected: ${selectedReport}`);
-        fetchPresetDetails(selectedReport);
         setActivePanel(null);
+  toast.info(`Starting AI automation for: ${selectedReport}`, { autoClose: 2000 });
+  await simulateAITableSelectionFromPreset(selectedReport);
       }}
+      
       className="w-full bg-blue-600 text-white px-3 py-2 rounded shadow disabled:bg-gray-400"
+     
       disabled={!selectedReport}
     >
       Continue
