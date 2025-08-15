@@ -51,6 +51,7 @@ function Home() {
   const [settingsPanel, setSettingsPanel] = useState(false);
   const [validityLeft, setValidityLeft] = useState();
   const [valid, setValid] = useState(true);
+  const [aiTargetColumn, setAiTargetColumn] = useState(null);
 
   const [presetKeys, setPresetKeys] = useState([]);      // string[]
 const [presetsLoading, setPresetsLoading] = useState(false);
@@ -63,6 +64,7 @@ const [isAIProcessing, setIsAIProcessing] = useState(false);
 const [currentAIStep, setCurrentAIStep] = useState(0); // 0 idle, 1 processing, 2 done
 const [aiTargetTable, setAiTargetTable] = useState(null); // table name to highlight
 const [aiLoaderMessage, setAiLoaderMessage] = useState("");
+
 
   const resizerRef = useRef(null);
 // Add this ref to track tables state changes
@@ -86,7 +88,7 @@ const waitForTables = () =>
     }, 200);
   });
 
-  // Main automation function for step 1
+// Enhanced automation function focusing only on the main table (schema[0])
 const simulateAITableSelectionFromPreset = async (presetKey) => {
   try {
     setIsAIProcessing(true);
@@ -105,43 +107,68 @@ const simulateAITableSelectionFromPreset = async (presetKey) => {
       return;
     }
 
-    // 2) Pick primary table (first key in schema)
-    const primaryTable = Object.keys(data.schema)[0];
-    if (!primaryTable) {
-      toast.error("No table found in preset schema");
+    // 2) Get ONLY the main table (first key in schema) - e.g., "sale_order_line"
+    const mainTableName = Object.keys(data.schema)[0];
+    const mainTableColumns = data.schema[mainTableName];
+    
+    if (!mainTableName || !mainTableColumns) {
+      toast.error("No main table found in preset schema");
       return;
     }
 
-    // 3) Visual guidance - highlight Tables panel and set search
-    setAiLoaderMessage(`Locating table: ${primaryTable}...`);
-    setAiTargetTable(primaryTable);
-    setActivePanel("tables");
-    
-    // ✨ NEW: Automatically set the search field to the primary table name
-    setTablesSearch(primaryTable);
-    
-    await new Promise((r) => setTimeout(r, 1200)); // Visual delay
+    console.log("Main table identified:", mainTableName);
+    console.log("Main table columns:", mainTableColumns);
 
-    // 4) Wait for base tables list to be loaded
+    // 3) Open Tables panel with visual feedback
+    setAiLoaderMessage("Opening Tables panel...");
+    setActivePanel("tables");
+    await new Promise((r) => setTimeout(r, 800));
+
+    // 4) Wait for tables list to load
     setAiLoaderMessage("Loading tables list...");
     await waitForTables();
-    await new Promise((r) => setTimeout(r, 800));
+    await new Promise((r) => setTimeout(r, 500));
 
-    // 5) Programmatically select the table
-    setAiLoaderMessage(`Loading ${primaryTable} metadata...`);
-    await handleTableSelect(primaryTable);
+    // 5) Typing animation for table search
+    setAiLoaderMessage(`Searching for main table: ${mainTableName}...`);
+    setAiTargetTable(mainTableName);
+    
+    // Clear search field first
+    setTablesSearch("");
+    await new Promise((r) => setTimeout(r, 300));
+    
+    // Type each character with natural delays
+    for (let i = 0; i <= mainTableName.length; i++) {
+      const partialText = mainTableName.substring(0, i);
+      setTablesSearch(partialText);
+      
+      // Variable typing speed for natural feel
+      const delay = Math.random() * 120 + 80; // Random delay between 80-200ms
+      await new Promise((r) => setTimeout(r, delay));
+    }
+    
+    // Hold the complete search term
     await new Promise((r) => setTimeout(r, 1000));
 
-    // 6) Completion
-    setAiLoaderMessage("Step 1 completed successfully!");
-    setCurrentAIStep(2);
-    await new Promise((r) => setTimeout(r, 800));
+    // 6) Select the main table and load its metadata
+    setAiLoaderMessage(`Loading ${mainTableName} metadata...`);
+    await handleTableSelect(mainTableName);
+    await new Promise((r) => setTimeout(r, 1500));
 
-    toast.success("AI automation step 1 completed successfully!", { autoClose: 3000 });
+    // 7) Now automate column selection for the main table
+    setAiLoaderMessage("Selecting relevant columns...");
+    await automateColumnSelection(mainTableName, mainTableColumns);
+
+    // 8) Completion
+    setAiLoaderMessage("AI automation completed successfully!");
+    setCurrentAIStep(2);
+    await new Promise((r) => setTimeout(r, 1000));
+
+    toast.success("AI automation completed! Main table and columns selected.", { autoClose: 3000 });
     
   } catch (error) {
-    console.error("AI selection failed:", error);
-    toast.error("Failed to automate table selection");
+    console.error("AI automation failed:", error);
+    toast.error("Failed to complete AI automation");
   } finally {
     setIsAIProcessing(false);
     setCurrentAIStep(0);
@@ -151,6 +178,62 @@ const simulateAITableSelectionFromPreset = async (presetKey) => {
     setActivePanel(null);
   }
 };
+// New function to automate column selection with animations
+const automateColumnSelection = async (tableName, schemaColumns) => {
+  // Wait a bit for the table to be fully loaded
+  await new Promise((r) => setTimeout(r, 800));
+  
+  // Get the table object to access its columns
+  const table = tables.find((t) => t.name === tableName);
+  if (!table || !table.columns || table.columns.length === 0) {
+    console.warn("Table not found or has no columns loaded");
+    return;
+  }
+
+  // Extract column names from schema (handling both string and object formats)
+  const columnsToSelect = [];
+schemaColumns.forEach(item => {
+  if (typeof item === 'string') {
+    // Direct column name like "state", "product_uom_qty"
+    columnsToSelect.push(item);
+  } else if (typeof item === 'object' && item !== null) {
+    // Relation object like {"order_id": [{"relation": "sale_order"}]}
+    const columnName = Object.keys(item)[0];
+    if (columnName) {
+      columnsToSelect.push(columnName);
+    }
+  }
+});
+
+  console.log("Columns to select:", columnsToSelect);
+
+  // Animate selection of each column with delays
+  for (let i = 0; i < columnsToSelect.length; i++) {
+    const columnName = columnsToSelect[i];
+    const columnObj = table.columns.find(col => col.name === columnName);
+    
+    if (columnObj) {
+      setAiLoaderMessage(`Selecting column: ${columnName}...`);
+      
+      // Highlight this specific column by updating the target
+      setAiTargetColumn(columnName);
+      
+      // Simulate the column toggle with delay
+      await new Promise((r) => setTimeout(r, 600));
+      await handleColumnToggle(tableName, columnObj, true);
+      
+      // Brief pause between selections
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    else {
+  console.warn(`Column ${columnName} not found in table ${tableName}`);
+}
+  }
+  
+  // Clear column highlighting
+  setAiTargetColumn(null);
+};
+
   // ─────────────────────────────────────────────────────────────
   // ✅ NEW: Centralized auth guards + API wrapper
   // ─────────────────────────────────────────────────────────────
@@ -450,6 +533,7 @@ const fetchPresetDetails = (key) => {
         const cols = Object.entries(json.data).map(([colName, meta]) => ({
           name: colName,
           relation: meta.relation || null,
+          referenced_column: meta.referenced_column || null
         }));
         setTables((prev) =>
           prev.map((t) => (t.name === tableName ? { ...t, columns: cols } : t))
@@ -483,75 +567,96 @@ const fetchPresetDetails = (key) => {
   }, [selectedTables, tables]);
 
   // Generate a React Flow node
-  const generateNode = useCallback(
-    (tableName, x, y, selectedCols = []) => {
-      const table = tables.find((t) => t.name === tableName);
-      if (!table) return null;
-      const search = columnSearches[tableName] || "";
+ const generateNode = useCallback(
+  (tableName, x, y, selectedCols = []) => {
+    const table = tables.find((t) => t.name === tableName);
+    if (!table) return null;
+    const search = columnSearches[tableName] || "";
 
-      return {
-        id: tableName,
-        position: { x, y },
-        type: "default",
-        data: {
-          label: (
-            <div className="bg-white text-xs max-w-[240px] border border-gray-300 rounded-lg shadow p-2">
-              <div className="flex items-center mb-1 justify-between">
-                <strong
-                  onClick={() => handleOpenModal(tableName)}
-                  className="block hover:text-blue-500 cursor-pointer truncate"
-                >
-                  {tableName}
-                </strong>
-              </div>
-              <div className="flex items-center mb-2 gap-1">
-                <input
-                  type="text"
-                  placeholder="Search columns"
-                  className="w-full px-1 py-0.5 text-[11px] border border-gray-300 rounded"
-                  value={search}
-                  onChange={(e) =>
-                    handleSearchChange(tableName, e.target.value)
-                  }
-                />
-              </div>
-              <ul className="max-h-[150px] overflow-y-auto scrollsettings space-y-1 pr-1">
-                {table.columns
-                  .filter(
-                    (col) =>
-                      col.name.toLowerCase() !== "id" &&
-                      (!search ||
-                        col.name.toLowerCase().includes(search.toLowerCase()))
-                  )
-                  .map((col) => (
+    return {
+      id: tableName,
+      position: { x, y },
+      type: "default",
+      data: {
+        label: (
+          <div className="bg-white text-xs max-w-[240px] border border-gray-300 rounded-lg shadow p-2">
+            <div className="flex items-center mb-1 justify-between">
+              <strong
+                onClick={() => handleOpenModal(tableName)}
+                className={`block hover:text-blue-500 cursor-pointer truncate ${
+                  isAIProcessing && aiTargetTable === tableName ? 'text-blue-700 font-bold' : ''
+                }`}
+              >
+                {tableName}
+                {isAIProcessing && aiTargetTable === tableName && (
+                  <span className="ml-1 text-blue-600 animate-pulse">⚡</span>
+                )}
+              </strong>
+            </div>
+            <div className="flex items-center mb-2 gap-1">
+              <input
+                type="text"
+                placeholder="Search columns"
+                className="w-full px-1 py-0.5 text-[11px] border border-gray-300 rounded"
+                value={search}
+                onChange={(e) => handleSearchChange(tableName, e.target.value)}
+                disabled={isAIProcessing}
+              />
+            </div>
+            <ul className="max-h-[150px] overflow-y-auto scrollsettings space-y-1 pr-1">
+              {table.columns
+                .filter(
+                  (col) =>
+                    col.name.toLowerCase() !== "id" &&
+                    (!search ||
+                      col.name.toLowerCase().includes(search.toLowerCase()))
+                )
+                .map((col) => {
+                  const isAITargetCol = isAIProcessing && aiTargetColumn === col.name;
+                  const isSelected = selectedCols.includes(col.name);
+                  
+                  return (
                     <li
                       key={col.name}
-                      className="flex items-center justify-between"
+                      className={`flex items-center justify-between transition-all duration-300 ${
+                        isAITargetCol ? 'bg-yellow-100 border border-yellow-400 rounded px-1 animate-pulse' : ''
+                      }`}
                     >
                       <label className="flex items-center space-x-1">
                         <input
                           type="checkbox"
-                          checked={selectedCols.includes(col.name)}
+                          checked={isSelected}
                           onChange={() => handleColumnToggle(tableName, col)}
+                          disabled={isAIProcessing}
+                          className={isAITargetCol ? 'accent-yellow-500' : ''}
                         />
                         {col.relation ? (
-                          <span className="text-blue-600 truncate">
+                          <span className={`text-blue-600 truncate ${
+                            isAITargetCol ? 'font-bold text-yellow-700' : ''
+                          }`}>
                             {col.name}
+                            {isAITargetCol && <span className="ml-1 animate-bounce">←</span>}
                           </span>
                         ) : (
-                          <span className="truncate">{col.name}</span>
+                          <span className={`truncate ${
+                            isAITargetCol ? 'font-bold text-yellow-700' : ''
+                          }`}>
+                            {col.name}
+                            {isAITargetCol && <span className="ml-1 animate-bounce">←</span>}
+                          </span>
                         )}
                       </label>
                     </li>
-                  ))}
-              </ul>
-            </div>
-          ),
-        },
-      };
-    },
-    [tables, columnSearches]
-  );
+                  );
+                })}
+            </ul>
+          </div>
+        ),
+      },
+    };
+  },
+  [tables, columnSearches, isAIProcessing, aiTargetTable, aiTargetColumn]
+);
 
   // Add a table node
   const addTable = (tableName) => {
@@ -571,16 +676,16 @@ const fetchPresetDetails = (key) => {
     setActivePanel(null);
   };
 
-  const handleColumnToggle = async (tableName, column) => {
-    // if this column points at another table, make sure that table is already loaded
-    if (column.relation) {
-      const related = column.relation.replace(/\./g, "_").toLowerCase();
-      if (!selectedTables[related]) {
-        await handleTableSelect(related);
-      }
+ const handleColumnToggle = async (tableName, column, skipAutoLoad = false) => {
+  // Skip auto-loading related tables during automation
+  if (!skipAutoLoad && column.relation) {
+    const related = column.relation.replace(/\./g, "_").toLowerCase();
+    if (!selectedTables[related]) {
+      await handleTableSelect(related);
     }
-    toggleColumn(tableName, column);
-  };
+  }
+  toggleColumn(tableName, column);
+};
 
   // Toggle column selection (and auto-add related tables)
   const toggleColumn = (tableName, column) => {
@@ -744,7 +849,9 @@ const fetchPresetDetails = (key) => {
         if (col?.relation) {
           relationCols.push({
             [col.name]: [
-              { relation: col.relation.replace(/\./g, "_").toLowerCase() },
+              { relation: col.relation.replace(/\./g, "_").toLowerCase(),
+                referenced_column: col.referenced_column || "id"
+               },
             ],
           });
         } else {
@@ -759,7 +866,7 @@ const fetchPresetDetails = (key) => {
       return;
     }
 
-    const payload = { schema: output, db_token: authCheck.dbToken };
+    const payload = { selected_columns: output, db_token: authCheck.dbToken };
 
     console.log("Payload being sent:", payload);
 
@@ -827,6 +934,8 @@ const fetchPresetDetails = (key) => {
       setpageLoading(false);
     }
   };
+  // Enhanced table list rendering focusing on main table
+
 
   // Updated handleGenerateCharts function for the new API structure
   const handleGenerateCharts = async () => {
@@ -879,7 +988,9 @@ const fetchPresetDetails = (key) => {
         if (col?.relation) {
           relationCols.push({
             [col.name]: [
-              { relation: col.relation.replace(/\./g, "_").toLowerCase() },
+              { relation: col.relation.replace(/\./g, "_").toLowerCase(),
+                referenced_column: col.referenced_column || "id"
+               },
             ],
           });
         } else {
