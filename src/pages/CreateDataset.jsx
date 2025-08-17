@@ -176,6 +176,43 @@ function Home() {
       setAiLoaderMessage("Selecting relevant columns...");
       await automateColumnSelection(mainTableName, mainTableColumns);
 
+   // 7.1) Process the rest of the preset tables (breadth-first, minimal changes)
+   const schemaMap = buildPresetSchemaMap(data.schema);
+   const processed = new Set([mainTableName]);
+   const queue = Object.keys(data.schema).filter((t) => t !== mainTableName);
+
+   while (queue.length > 0) {
+     const tbl = queue.shift();
+     if (!tbl || processed.has(tbl)) continue;
+
+     // if preset has columns for this table, proceed
+     const tblCols = data.schema[tbl];
+     if (!Array.isArray(tblCols) || tblCols.length === 0) {
+       processed.add(tbl);
+       continue;
+     }
+
+     setAiLoaderMessage(`Loading ${tbl} metadata...`);
+     // ensure the table node exists and columns are ready
+     if (!selectedTables[tbl]) {
+       await handleTableSelect(tbl);
+     }
+     await waitForTableColumns(tbl, 10000);
+
+     setAiLoaderMessage(`Selecting ${tbl} fields...`);
+     const res = await automateColumnSelection(tbl, tblCols);
+
+     // enqueue any new related tables from this run that also exist in preset
+     if (res && Array.isArray(res.relatedTables)) {
+       res.relatedTables
+         .filter((rt) => data.schema[rt]) // only those present in preset
+         .forEach((rt) => {
+           if (!processed.has(rt)) queue.push(rt);
+         });
+     }
+     processed.add(tbl);
+   }
+
       // 8) Completion
       setAiLoaderMessage("AI automation completed successfully!");
       setCurrentAIStep(2);
@@ -197,10 +234,32 @@ function Home() {
       setActivePanel(null);
     }
   };
+  const buildPresetSchemaMap = (schema) => {
+  const map = {};
+  Object.entries(schema || {}).forEach(([tbl, cols]) => {
+    const strings = [];
+    const relPairs = [];
+    (cols || []).forEach((item) => {
+      if (typeof item === "string") {
+        if (item.toLowerCase() !== "id") strings.push(item);
+      } else if (item && typeof item === "object") {
+        const fk = Object.keys(item)[0];
+        const child = item[fk];
+        const rel = Array.isArray(child) && child[0]?.relation
+          ? child[0].relation.replace(/\./g, "_").toLowerCase()
+          : null;
+        if (fk && rel && rel !== "id") relPairs.push({ [fk]: rel });
+      }
+    });
+    map[tbl] = { strings, relPairs };
+  });
+  return map;
+};
   // New function to automate column selection with animations
   const automateColumnSelection = async (tableName, schemaColumns) => {
     // Wait a bit for the table to be fully loaded
     await new Promise((r) => setTimeout(r, 800));
+    const newlyAddedRelated = [];
 
     // Get the table object to access its columns
     const table = tablesRef.current.find((t) => t.name === tableName);
@@ -260,6 +319,8 @@ function Home() {
       }
     }
 
+
+
     // Animate selection of each column with delays
     for (let i = 0; i < relationTablesFromPreset.length; i++) {
       const entry = relationTablesFromPreset[i];
@@ -291,6 +352,7 @@ function Home() {
           try {
             await handleTableSelect(relatedTable);
             await waitForTableColumns(relatedTable, 10000);
+            newlyAddedRelated.push(relatedTable);
           } catch (e) {
             console.warn(`Failed adding related table ${relatedTable}:`, e);
             toast.warn(`Could not load related table "${relatedTable}"`);
@@ -325,6 +387,7 @@ function Home() {
 
     // Clear column highlighting
     setAiTargetColumn(null);
+    return { relatedTables: newlyAddedRelated };
   };
 
   // ─────────────────────────────────────────────────────────────
