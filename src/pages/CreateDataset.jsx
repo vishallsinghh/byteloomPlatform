@@ -50,7 +50,7 @@ function Home() {
   const [activePanel, setActivePanel] = useState(null); // 'tables' | 'datasets' | null
   const [settingsPanel, setSettingsPanel] = useState(false);
   const [validityLeft, setValidityLeft] = useState();
-  const [valid, setValid] = useState(true);
+  
   const [aiTargetColumn, setAiTargetColumn] = useState(null);
 
   const [presetKeys, setPresetKeys] = useState([]); // string[]
@@ -64,6 +64,11 @@ function Home() {
   const [currentAIStep, setCurrentAIStep] = useState(0); // 0 idle, 1 processing, 2 done
   const [aiTargetTable, setAiTargetTable] = useState(null); // table name to highlight
   const [aiLoaderMessage, setAiLoaderMessage] = useState("");
+const [spotlightTarget, setSpotlightTarget] = useState(null); // 'search-input' | 'table-node' | null
+const [activeTableNode, setActiveTableNode] = useState(null); // table name currently being processed
+const [initialViewport, setInitialViewport] = useState(null); // Store initial canvas position
+
+
 
   const resizerRef = useRef(null);
   // Add this ref to track tables state changes
@@ -101,298 +106,369 @@ function Home() {
         }
       }, 150);
     });
+// NEW FUNCTION: Smooth canvas scroll to focus on a specific table during automation
+const smoothScrollToTable = async (tableName, duration = 800) => {
+  const reactFlowInstance = window.reactFlowInstance;
+  if (!reactFlowInstance) {
+    console.warn("ReactFlow instance not available for canvas scrolling");
+    return;
+  }
 
-  // Enhanced automation function focusing only on the main table (schema[0])
-  const simulateAITableSelectionFromPreset = async (presetKey) => {
-    try {
-      setIsAIProcessing(true);
-      setCurrentAIStep(1);
-      setAiLoaderMessage("Fetching preset details...");
-      handleReset();
-      // 1) Fetch preset details
-      const response = await fetch(
-        `https://demo.techfinna.com/api/datasets/presets/${encodeURIComponent(
-          presetKey
-        )}`
-      );
-      const data = await response.json();
-      console.log("Preset response:", data);
+  // Log current position before scrolling
+  const currentViewport = reactFlowInstance.getViewport();
+  console.log(`Canvas position before scrolling to table ${tableName}:`, currentViewport);
 
-      if (!data.schema || typeof data.schema !== "object") {
-        toast.error("Invalid preset schema received");
-        return;
-      }
-
-      // 2) Get ONLY the main table (first key in schema) - e.g., "sale_order_line"
-      const mainTableName = Object.keys(data.schema)[0];
-      const mainTableColumns = data.schema[mainTableName];
-
-      if (!mainTableName || !mainTableColumns) {
-        toast.error("No main table found in preset schema");
-        return;
-      }
-
-      console.log("Main table identified:", mainTableName);
-      console.log("Main table columns:", mainTableColumns);
-
-      // 3) Open Tables panel with visual feedback
-      setAiLoaderMessage("Opening Tables panel...");
-      setActivePanel("tables");
-      await new Promise((r) => setTimeout(r, 800));
-
-      // 4) Wait for tables list to load
-      setAiLoaderMessage("Loading tables list...");
-      await waitForTables();
-      await new Promise((r) => setTimeout(r, 500));
-
-      // 5) Typing animation for table search
-      setAiLoaderMessage(`Searching for main table: ${mainTableName}...`);
-      setAiTargetTable(mainTableName);
-
-      // Clear search field first
-      setTablesSearch("");
-      await new Promise((r) => setTimeout(r, 300));
-
-      // Type each character with natural delays
-      for (let i = 0; i <= mainTableName.length; i++) {
-        const partialText = mainTableName.substring(0, i);
-        setTablesSearch(partialText);
-
-        // Variable typing speed for natural feel
-        const delay = Math.random() * 120 + 80; // Random delay between 80-200ms
-        await new Promise((r) => setTimeout(r, delay));
-      }
-
-      // Hold the complete search term
-      await new Promise((r) => setTimeout(r, 1000));
-
-      // 6) Select the main table and load its metadata
-      setAiLoaderMessage(`Loading ${mainTableName} metadata...`);
-      await handleTableSelect(mainTableName);
-      await new Promise((r) => setTimeout(r, 1500));
-      await waitForTableColumns(mainTableName);
-
-      // 7) Now automate column selection for the main table
-      setAiLoaderMessage("Selecting relevant columns...");
-      await automateColumnSelection(mainTableName, mainTableColumns);
-
-   // 7.1) Process the rest of the preset tables (breadth-first, minimal changes)
-   const schemaMap = buildPresetSchemaMap(data.schema);
-   const processed = new Set([mainTableName]);
-   const queue = Object.keys(data.schema).filter((t) => t !== mainTableName);
-
-   while (queue.length > 0) {
-     const tbl = queue.shift();
-     if (!tbl || processed.has(tbl)) continue;
-
-     // if preset has columns for this table, proceed
-     const tblCols = data.schema[tbl];
-     if (!Array.isArray(tblCols) || tblCols.length === 0) {
-       processed.add(tbl);
-       continue;
-     }
-
-     setAiLoaderMessage(`Loading ${tbl} metadata...`);
-     // ensure the table node exists and columns are ready
-     if (!selectedTables[tbl]) {
-       await handleTableSelect(tbl);
-     }
-     await waitForTableColumns(tbl, 10000);
-
-     setAiLoaderMessage(`Selecting ${tbl} fields...`);
-     const res = await automateColumnSelection(tbl, tblCols);
-
-     // enqueue any new related tables from this run that also exist in preset
-     if (res && Array.isArray(res.relatedTables)) {
-       res.relatedTables
-         .filter((rt) => data.schema[rt]) // only those present in preset
-         .forEach((rt) => {
-           if (!processed.has(rt)) queue.push(rt);
-         });
-     }
-     processed.add(tbl);
-   }
-
-      // 8) Completion
-      setAiLoaderMessage("AI automation completed successfully!");
-      setCurrentAIStep(2);
-      await new Promise((r) => setTimeout(r, 1000));
-
-      toast.success(
-        "AI automation completed! Main table and columns selected.",
-        { autoClose: 3000 }
-      );
-    } catch (error) {
-      console.error("AI automation failed:", error);
-      toast.error("Failed to complete AI automation");
-    } finally {
-      setIsAIProcessing(false);
-      setCurrentAIStep(0);
-      setAiTargetTable(null);
-      setTablesSearch(""); // Clear search after automation
-      setAiLoaderMessage("");
-      setActivePanel(null);
-    }
-  };
-  const buildPresetSchemaMap = (schema) => {
-  const map = {};
-  Object.entries(schema || {}).forEach(([tbl, cols]) => {
-    const strings = [];
-    const relPairs = [];
-    (cols || []).forEach((item) => {
-      if (typeof item === "string") {
-        if (item.toLowerCase() !== "id") strings.push(item);
-      } else if (item && typeof item === "object") {
-        const fk = Object.keys(item)[0];
-        const child = item[fk];
-        const rel = Array.isArray(child) && child[0]?.relation
-          ? child[0].relation.replace(/\./g, "_").toLowerCase()
-          : null;
-        if (fk && rel && rel !== "id") relPairs.push({ [fk]: rel });
-      }
+  try {
+    // Method 1: Use fitView to focus on specific node
+    await reactFlowInstance.fitView({
+      nodes: [{ id: tableName }], // Focus on specific table node
+      duration: duration,
+      padding: 0.3, // Add padding around the focused node
+      maxZoom: 1.2, // Limit maximum zoom
+      minZoom: 0.5  // Limit minimum zoom
     });
-    map[tbl] = { strings, relPairs };
-  });
-  return map;
+    
+    // Log position after scrolling
+    setTimeout(() => {
+      const newViewport = reactFlowInstance.getViewport();
+      console.log(`Canvas position after scrolling to table ${tableName}:`, newViewport);
+    }, duration + 100);
+    
+  } catch (error) {
+    console.warn(`Failed to scroll to table ${tableName} using fitView:`, error);
+    
+    // Fallback method: Find node position and center manually
+    const nodes = reactFlowInstance.getNodes();
+    const targetNode = nodes.find(node => node.id === tableName);
+    
+    if (targetNode) {
+      const { x, y } = targetNode.position;
+      const { width, height } = reactFlowInstance.getViewport();
+      
+      // Calculate center position
+      const centerX = -x + (window.innerWidth - 60) / 2; // Subtract sidebar width
+      const centerY = -y + (window.innerHeight - 55) / 2; // Subtract navbar height
+      
+      reactFlowInstance.setViewport({
+        x: centerX,
+        y: centerY,
+        zoom: 1
+      }, { duration: duration });
+      
+      console.log(`Fallback: Centered canvas on table ${tableName} at position:`, { x: centerX, y: centerY });
+    }
+  }
+  
+  // Wait for animation to complete
+  await new Promise(r => setTimeout(r, duration + 100));
 };
-  // New function to automate column selection with animations
-  const automateColumnSelection = async (tableName, schemaColumns) => {
-    // Wait a bit for the table to be fully loaded
-    await new Promise((r) => setTimeout(r, 800));
-    const newlyAddedRelated = [];
 
-    // Get the table object to access its columns
-    const table = tablesRef.current.find((t) => t.name === tableName);
-    if (!table || !table.columns || table.columns.length === 0) {
-      console.warn("Table not found or has no columns loaded");
+
+// ENHANCED simulateAITableSelectionFromPreset with canvas scrolling
+const simulateAITableSelectionFromPreset = async (presetKey) => {
+  try {
+    setIsAIProcessing(true);
+    setCurrentAIStep(1);
+    setAiLoaderMessage("Fetching preset details...");
+    handleReset();
+    
+    // Store initial viewport position
+    const reactFlowInstance = window.reactFlowInstance;
+    if (reactFlowInstance) {
+      const viewport = reactFlowInstance.getViewport();
+      setInitialViewport(viewport);
+      console.log("Initial canvas position:", viewport);
+    }
+    
+    // 1) Fetch preset details
+    const response = await fetch(
+      `https://demo.techfinna.com/api/datasets/presets/${encodeURIComponent(
+        presetKey
+      )}`
+    );
+    const data = await response.json();
+    console.log("Preset response:", data);
+
+    if (!data.schema || typeof data.schema !== "object") {
+      toast.error("Invalid preset schema received");
       return;
     }
 
-    const columnsToSelect = (schemaColumns || [])
-
-      .filter((item) => typeof item === "string")
-      .filter((name) => name.toLowerCase() !== "id");
-
-    console.log("Columns to select:", columnsToSelect);
-
-    // Also collect relation table names from the preset (relation property inside object children)
-    // Collect FK→related-table pairs from preset, normalized with underscores
-    const relationTablesFromPreset = (schemaColumns || [])
-      .filter((item) => typeof item === "object" && item !== null)
-      .map((obj) => {
-        const fk = Object.keys(obj)[0]; // e.g., "order_id"
-        const child = obj[fk];
-        const rel =
-          Array.isArray(child) && child[0]?.relation ? child[0].relation : null;
-        if (!fk || !rel) return null;
-        // normalize relation table name: dots → underscores, lowercase
-        const related = rel.replace(/\./g, "_").toLowerCase();
-        if (related === "id") return null;
-        return { [fk]: related }; // e.g., { order_id: "sale_order" }
-      })
-      .filter(Boolean);
-
-    console.log("Relation pairs (fk → related):", relationTablesFromPreset);
-    const addedRelated = new Set();
-    // Animate selection of each column with delays
-    for (let i = 0; i < columnsToSelect.length; i++) {
-      const columnName = columnsToSelect[i];
-      const columnObj = table.columns.find((col) => col.name === columnName);
-
-      if (columnObj) {
-        setAiLoaderMessage(`Selecting column: ${columnName}...`);
-
-        // Highlight this specific column by updating the target
-        setAiTargetColumn(columnName);
-
-        // Simulate the column toggle with delay
-        await new Promise((r) => setTimeout(r, 600));
-        await handleColumnToggle(tableName, columnObj);
-
-        // Brief pause between selections
-        await new Promise((r) => setTimeout(r, 400));
-      } else {
-        console.warn(`Column ${columnName} not found in table ${tableName}`);
-        // (6) Warn but continue
-        toast.warn(`Preset column "${columnName}" not found in ${tableName}`);
-        await new Promise((r) => setTimeout(r, 250));
-      }
+    // 2) Get tables in the exact order they appear in the schema
+    const tableNames = Object.keys(data.schema);
+    const mainTableName = tableNames[0]; // First table is main table
+    
+    if (!mainTableName || !data.schema[mainTableName]) {
+      toast.error("No main table found in preset schema");
+      return;
     }
 
+    console.log("Tables in order:", tableNames);
+    console.log("Main table identified:", mainTableName);
 
+    // 3) Open Tables panel with visual feedback
+    setAiLoaderMessage("Opening Tables panel...");
+    setActivePanel("tables");
+    await new Promise((r) => setTimeout(r, 200));
 
-    // Animate selection of each column with delays
-    for (let i = 0; i < relationTablesFromPreset.length; i++) {
-      const entry = relationTablesFromPreset[i];
-      const columnName =
-        typeof entry === "string" ? entry : Object.keys(entry)[0]; // FK name
-      const relatedRaw = typeof entry === "string" ? null : entry[columnName]; // related table (normalized)
-      const relatedTable = (relatedRaw || "").replace(/\./g, "_").toLowerCase();
-      const columnObj = table.columns.find((col) => col.name === columnName);
+    // 4) Wait for tables list to load
+    setAiLoaderMessage("Loading tables list...");
+    await waitForTables();
+    await new Promise((r) => setTimeout(r, 100));
 
-      if (columnObj) {
-        setAiLoaderMessage(`Selecting column: ${columnName}...`);
+    // 5) Search and select main table
+    setAiLoaderMessage(`Searching for main table: ${mainTableName}...`);
+    setAiTargetTable(mainTableName);
+    setSpotlightTarget('search-input');
 
-        // Highlight this specific column by updating the target
-        setAiTargetColumn(columnName);
+    // Clear search field first
+    setTablesSearch("");
+    await new Promise((r) => setTimeout(r, 100));
 
-        // Simulate the column toggle with delay
-        await new Promise((r) => setTimeout(r, 600));
-        await handleColumnToggle(tableName, columnObj);
-
-        // Brief pause between selections
-        await new Promise((r) => setTimeout(r, 400));
-
-        if (
-          relatedTable &&
-          !selectedTables[relatedTable] &&
-          !addedRelated.has(relatedTable)
-        ) {
-          setAiLoaderMessage(`Adding related table: ${relatedTable}...`);
-          try {
-            await handleTableSelect(relatedTable);
-            await waitForTableColumns(relatedTable, 10000);
-            newlyAddedRelated.push(relatedTable);
-          } catch (e) {
-            console.warn(`Failed adding related table ${relatedTable}:`, e);
-            toast.warn(`Could not load related table "${relatedTable}"`);
-          }
-          addedRelated.add(relatedTable);
-          await new Promise((r) => setTimeout(r, 300));
-        }
-        // After FK is selected, explicitly add the related table once
-        if (
-          relatedTable &&
-          !selectedTables[relatedTable] &&
-          !addedRelated.has(relatedTable)
-        ) {
-          setAiLoaderMessage(`Adding related table: ${relatedTable}...`);
-          try {
-            await handleTableSelect(relatedTable);
-            await waitForTableColumns(relatedTable, 10000); // warn & move on if slow
-          } catch (e) {
-            console.warn(`Failed adding related table ${relatedTable}:`, e);
-            toast.warn(`Could not load related table "${relatedTable}"`);
-          }
-          addedRelated.add(relatedTable);
-          await new Promise((r) => setTimeout(r, 300));
-        }
-      } else {
-        console.warn(`Column ${columnName} not found in table ${tableName}`);
-        // (6) Warn but continue
-        toast.warn(`Preset column "${columnName}" not found in ${tableName}`);
-        await new Promise((r) => setTimeout(r, 250));
-      }
+    // Type each character with natural delays
+    for (let i = 0; i <= mainTableName.length; i++) {
+      const partialText = mainTableName.substring(0, i);
+      setTablesSearch(partialText);
+      const delay = Math.random() * 30 + 20;
+      await new Promise((r) => setTimeout(r, delay));
     }
 
-    // Clear column highlighting
-    setAiTargetColumn(null);
-    return { relatedTables: newlyAddedRelated };
-  };
+    // Hold the complete search term
+    await new Promise((r) => setTimeout(r, 300));
+    setSpotlightTarget(null);
 
-  // ─────────────────────────────────────────────────────────────
-  // ✅ NEW: Centralized auth guards + API wrapper
-  // ─────────────────────────────────────────────────────────────
+    // 6) Select the main table and load its metadata
+    setAiLoaderMessage(`Loading ${mainTableName} metadata...`);
+    await handleTableSelect(mainTableName);
+    await new Promise((r) => setTimeout(r, 400));
+    await waitForTableColumns(mainTableName);
+
+    // NEW: Smooth scroll to the main table after it's added to canvas
+    setAiLoaderMessage(`Focusing on ${mainTableName}...`);
+    await smoothScrollToTable(mainTableName, 600);
+
+    // 7) Process tables in EXACT SCHEMA ORDER with canvas scrolling
+    setSpotlightTarget('table-node');
+    
+    for (let i = 0; i < tableNames.length; i++) {
+      const tableName = tableNames[i];
+      const tableColumns = data.schema[tableName];
+      
+      if (!Array.isArray(tableColumns) || tableColumns.length === 0) {
+        continue;
+      }
+
+      setActiveTableNode(tableName);
+      setAiLoaderMessage(`Processing table ${i + 1}/${tableNames.length}: ${tableName}...`);
+      
+      // Ensure table is selected and loaded
+      if (!selectedTables[tableName]) {
+        await handleTableSelect(tableName);
+        await waitForTableColumns(tableName, 10000);
+      }
+
+      // NEW: Scroll to table BEFORE processing its columns
+      setAiLoaderMessage(`Focusing on ${tableName}...`);
+      await smoothScrollToTable(tableName, 500);
+
+      // Process ALL columns for this table BEFORE moving to next table
+      await automateColumnSelection(tableName, tableColumns);
+      
+      await new Promise((r) => setTimeout(r, 100));
+    }
+
+    // 8) Return to initial viewport position with smooth animation
+    setAiLoaderMessage("Returning to initial view...");
+    if (reactFlowInstance && initialViewport) {
+      try {
+        reactFlowInstance.setViewport(
+          {
+            x: initialViewport.x,
+            y: initialViewport.y,
+            zoom: initialViewport.zoom
+          },
+          { duration: 800 }
+        );
+        console.log("Returning to initial canvas position:", initialViewport);
+        await new Promise((r) => setTimeout(r, 800));
+      } catch (error) {
+        console.warn("Failed to restore initial viewport:", error);
+        try {
+          reactFlowInstance.setViewport(initialViewport);
+          console.log("Fallback: Set canvas position to:", initialViewport);
+        } catch (fallbackError) {
+          console.warn("Fallback viewport restore also failed:", fallbackError);
+        }
+      }
+    } else {
+      console.warn("ReactFlow instance or initial viewport not available");
+    }
+
+    // 9) Completion
+    setAiLoaderMessage("AI automation completed successfully!");
+    setCurrentAIStep(2);
+    await new Promise((r) => setTimeout(r, 300));
+
+    toast.success(
+      "AI automation completed! All tables and columns selected.",
+      { autoClose: 3000 }
+    );
+  } catch (error) {
+    console.error("AI automation failed:", error);
+    toast.error("Failed to complete AI automation");
+  } finally {
+    setIsAIProcessing(false);
+    setCurrentAIStep(0);
+    setAiTargetTable(null);
+    setTablesSearch("");
+    setAiLoaderMessage("");
+    setActivePanel(null);
+    setSpotlightTarget(null);
+    setActiveTableNode(null);
+    setInitialViewport(null);
+  }
+};
+
+
+// Add this to your ReactFlow component to store the instance reference
+const onInit = (reactFlowInstance) => {
+  window.reactFlowInstance = reactFlowInstance;
+};
+ // FIXED function to scroll to column without canvas manipulation
+const scrollToColumnInTable = async (tableName, columnName) => {
+  // Log current canvas position before animation
+  const reactFlowInstance = window.reactFlowInstance;
+  if (reactFlowInstance) {
+    const currentViewport = reactFlowInstance.getViewport();
+    console.log(`Canvas position before animating to ${tableName}.${columnName}:`, currentViewport);
+  }
+
+  // Find the table node element in the DOM
+  const tableElement = document.querySelector(`[data-id="${tableName}"]`);
+  if (!tableElement) return;
+
+  // Find the column list container
+  const columnList = tableElement.querySelector('ul');
+  if (!columnList) return;
+
+  // Find the specific column item
+  const columnItems = columnList.querySelectorAll('li');
+  let targetColumnElement = null;
+
+  for (let item of columnItems) {
+    const label = item.querySelector('label span');
+    if (label && label.textContent.trim() === columnName) {
+      targetColumnElement = item;
+      break;
+    }
+  }
+
+  if (targetColumnElement) {
+    // Smooth scroll the column into view within the table's scrollable area
+    targetColumnElement.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+      inline: 'nearest'
+    });
+    
+    // Add temporary highlight effect
+    targetColumnElement.style.background = 'linear-gradient(90deg, #fbbf24, #f59e0b)';
+    targetColumnElement.style.transform = 'scale(1.02)';
+    targetColumnElement.style.transition = 'all 0.3s ease';
+    
+    setTimeout(() => {
+      targetColumnElement.style.background = '';
+      targetColumnElement.style.transform = '';
+    }, 300); // REDUCED DELAY: 1000ms -> 300ms
+
+    // Log canvas position after the scroll animation
+    if (reactFlowInstance) {
+      setTimeout(() => {
+        const newViewport = reactFlowInstance.getViewport();
+        console.log(`Canvas position after animating to ${tableName}.${columnName}:`, newViewport);
+      }, 350); // Wait for scroll animation to complete
+    }
+  }
+  
+  await new Promise(r => setTimeout(r, 100)); // REDUCED DELAY: 300ms -> 100ms
+};
+
+ 
+// ENHANCED automateColumnSelection - NO canvas scrolling during column processing
+const automateColumnSelection = async (tableName, schemaColumns) => {
+  await new Promise((r) => setTimeout(r, 200));
+
+  const table = tablesRef.current.find((t) => t.name === tableName);
+  if (!table || !table.columns || table.columns.length === 0) {
+    console.warn("Table not found or has no columns loaded");
+    return;
+  }
+
+  console.log(`Processing columns for ${tableName} in schema order:`, schemaColumns);
+
+  // Process columns in the EXACT order they appear in the schema
+  for (let i = 0; i < schemaColumns.length; i++) {
+    const schemaItem = schemaColumns[i];
+    
+    if (typeof schemaItem === "string") {
+      // Regular field
+      if (schemaItem.toLowerCase() === "id") continue;
+      
+      const columnObj = table.columns.find((col) => col.name === schemaItem);
+      if (columnObj) {
+        setAiLoaderMessage(`Selecting field: ${schemaItem}...`);
+        await scrollToColumnInTable(tableName, schemaItem);
+        setAiTargetColumn(schemaItem);
+        await new Promise((r) => setTimeout(r, 150));
+        await handleColumnToggle(tableName, columnObj);
+        await new Promise((r) => setTimeout(r, 100));
+      } else {
+        console.warn(`Column ${schemaItem} not found in table ${tableName}`);
+        toast.warn(`Preset column "${schemaItem}" not found in ${tableName}`);
+      }
+    } else if (typeof schemaItem === "object" && schemaItem !== null) {
+      // Relation field
+      const columnName = Object.keys(schemaItem)[0];
+      const relationInfo = schemaItem[columnName];
+      
+      if (columnName && Array.isArray(relationInfo) && relationInfo[0]?.relation) {
+        const columnObj = table.columns.find((col) => col.name === columnName);
+        
+        if (columnObj) {
+          setAiLoaderMessage(`Selecting relation field: ${columnName}...`);
+          await scrollToColumnInTable(tableName, columnName);
+          setAiTargetColumn(columnName);
+          await new Promise((r) => setTimeout(r, 150));
+          await handleColumnToggle(tableName, columnObj);
+          await new Promise((r) => setTimeout(r, 100));
+          
+          // Add related table if not already present (but DON'T scroll to it yet)
+          const relatedTableName = relationInfo[0].relation.replace(/\./g, "_").toLowerCase();
+          if (!selectedTables[relatedTableName]) {
+            setAiLoaderMessage(`Adding related table: ${relatedTableName}...`);
+            try {
+              await handleTableSelect(relatedTableName);
+              await waitForTableColumns(relatedTableName, 10000);
+              
+              // NOTE: Removed canvas scrolling here - related table will be processed in its turn
+              console.log(`Related table ${relatedTableName} added, will be processed in schema order`);
+            } catch (e) {
+              console.warn(`Failed adding related table ${relatedTableName}:`, e);
+              toast.warn(`Could not load related table "${relatedTableName}"`);
+            }
+          }
+        } else {
+          console.warn(`Relation column ${columnName} not found in table ${tableName}`);
+          toast.warn(`Preset column "${columnName}" not found in ${tableName}`);
+        }
+      }
+    }
+  }
+
+  setAiTargetColumn(null);
+  console.log(`Finished processing all columns for table: ${tableName}`);
+  return { processedTable: tableName };
+};
 
   // remove tokens helper
   const clearLocalTokens = () => {
@@ -492,29 +568,25 @@ function Home() {
 
     return { res, json };
   };
-  // ─────────────────────────────────────────────────────────────
-
-  // fetch presets keys
-  useEffect(() => {
-    if (activePanel === "agent") {
-      setPresetsLoading(true);
-      setPresetsError(null);
-      fetch("https://demo.techfinna.com/api/datasets/presets/")
-        .then((r) => r.json())
-        .then((d) => {
-          const keys = Array.isArray(d?.presets)
-            ? d.presets.map((p) => p.key).filter(Boolean)
-            : [];
-          setPresetKeys(keys);
-        })
-        .catch((err) => {
-          console.error("Failed to load presets:", err);
-          setPresetsError("Failed to load presets");
-          setPresetKeys([]);
-        })
-        .finally(() => setPresetsLoading(false));
-    }
-  }, [activePanel]);
+useEffect(() => {
+  if (activePanel === "agent") {
+    setPresetsLoading(true);
+    setPresetsError(null);
+    fetch("https://demo.techfinna.com/api/datasets/presets/")
+      .then((r) => r.json())
+      .then((d) => {
+        // Store full preset objects with key and title
+        const presets = Array.isArray(d?.presets) ? d.presets : [];
+        setPresetKeys(presets); // This will now contain {key, title} objects
+      })
+      .catch((err) => {
+        console.error("Failed to load presets:", err);
+        setPresetsError("Failed to load presets");
+        setPresetKeys([]);
+      })
+      .finally(() => setPresetsLoading(false));
+  }
+}, [activePanel]);
 
   // fetch preset key data tables
   const fetchPresetDetails = (key) => {
@@ -535,39 +607,50 @@ function Home() {
   };
 
   // Add this at the top of your Home component, after the imports
-  useEffect(() => {
-    // Suppress ResizeObserver errors
-    const resizeObserverErrDiv = document.getElementById(
-      "webpack-dev-server-client-overlay-div"
-    );
-    const resizeObserverErr = document.getElementById(
-      "webpack-dev-server-client-overlay"
-    );
-
-    if (resizeObserverErr) {
-      resizeObserverErr.setAttribute("style", "display: none");
+ useEffect(() => {
+  // Enhanced ResizeObserver error suppression
+  const originalError = console.error;
+  const originalWarn = console.warn;
+  
+  console.error = (...args) => {
+    if (
+      typeof args[0] === 'string' && 
+      (args[0].includes('ResizeObserver loop completed') ||
+       args[0].includes('ResizeObserver loop limit exceeded'))
+    ) {
+      return; // Ignore ResizeObserver errors
     }
-    if (resizeObserverErrDiv) {
-      resizeObserverErrDiv.setAttribute("style", "display: none");
+    originalError.apply(console, args);
+  };
+
+  console.warn = (...args) => {
+    if (
+      typeof args[0] === 'string' && 
+      args[0].includes('ResizeObserver')
+    ) {
+      return; // Ignore ResizeObserver warnings
     }
+    originalWarn.apply(console, args);
+  };
 
-    // Alternative: Override console.error temporarily for ResizeObserver
-    const originalError = console.error;
-    console.error = (...args) => {
-      if (
-        typeof args[0] === "string" &&
-        args[0].includes("ResizeObserver loop completed")
-      ) {
-        return; // Ignore ResizeObserver errors
-      }
-      originalError.apply(console, args);
-    };
+  // Add global error handler
+  const handleGlobalError = (event) => {
+    if (event.message && event.message.includes('ResizeObserver')) {
+      event.preventDefault();
+      event.stopPropagation();
+      return false;
+    }
+  };
 
-    // Cleanup
-    return () => {
-      console.error = originalError;
-    };
-  }, []);
+  window.addEventListener('error', handleGlobalError);
+
+  // Cleanup
+  return () => {
+    console.error = originalError;
+    console.warn = originalWarn;
+    window.removeEventListener('error', handleGlobalError);
+  };
+}, []);
 
   // === Fetch tables ===
   useEffect(() => {
@@ -726,112 +809,120 @@ function Home() {
     setNodes(newNodes);
   }, [selectedTables, tables]);
 
-  // Generate a React Flow node
-  const generateNode = useCallback(
-    (tableName, x, y, selectedCols = []) => {
-      const table = tables.find((t) => t.name === tableName);
-      if (!table) return null;
-      const search = columnSearches[tableName] || "";
+// ENHANCED generateNode (same name, added spotlight effects)
+const generateNode = useCallback(
+  (tableName, x, y, selectedCols = []) => {
+    const table = tables.find((t) => t.name === tableName);
+    if (!table) return null;
+    const search = columnSearches[tableName] || "";
+    const isActiveNode = activeTableNode === tableName;
 
-      return {
-        id: tableName,
-        position: { x, y },
-        type: "default",
-        data: {
-          label: (
-            <div className="bg-white text-xs max-w-[240px] border border-gray-300 rounded-lg shadow p-2">
-              <div className="flex items-center mb-1 justify-between">
-                <strong
-                  onClick={() => handleOpenModal(tableName)}
-                  className={`block hover:text-blue-500 cursor-pointer truncate ${
-                    isAIProcessing && aiTargetTable === tableName
-                      ? "text-blue-700 font-bold"
-                      : ""
-                  }`}
-                >
-                  {tableName}
-                  {isAIProcessing && aiTargetTable === tableName && (
-                    <span className="ml-1 text-blue-600 animate-pulse">⚡</span>
-                  )}
-                </strong>
-              </div>
-              <div className="flex items-center mb-2 gap-1">
-                <input
-                  type="text"
-                  placeholder="Search columns"
-                  className="w-full px-1 py-0.5 text-[11px] border border-gray-300 rounded"
-                  value={search}
-                  onChange={(e) =>
-                    handleSearchChange(tableName, e.target.value)
-                  }
-                  disabled={isAIProcessing}
-                />
-              </div>
-              <ul className="max-h-[150px] overflow-y-auto scrollsettings space-y-1 pr-1">
-                {table.columns
-                  .filter(
-                    (col) =>
-                      col.name.toLowerCase() !== "id" &&
-                      (!search ||
-                        col.name.toLowerCase().includes(search.toLowerCase()))
-                  )
-                  .map((col) => {
-                    const isAITargetCol =
-                      isAIProcessing && aiTargetColumn === col.name;
-                    const isSelected = selectedCols.includes(col.name);
-
-                    return (
-                      <li
-                        key={col.name}
-                        className={`flex items-center justify-between transition-all duration-300 ${
-                          isAITargetCol
-                            ? "bg-yellow-100 border border-yellow-400 rounded px-1 animate-pulse"
-                            : ""
-                        }`}
-                      >
-                        <label className="flex items-center space-x-1">
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => handleColumnToggle(tableName, col)}
-                            disabled={isAIProcessing}
-                            className={isAITargetCol ? "accent-yellow-500" : ""}
-                          />
-                          {col.relation ? (
-                            <span
-                              className={`text-blue-600 truncate ${
-                                isAITargetCol ? "font-bold text-yellow-700" : ""
-                              }`}
-                            >
-                              {col.name}
-                              {isAITargetCol && (
-                                <span className="ml-1 animate-bounce">←</span>
-                              )}
-                            </span>
-                          ) : (
-                            <span
-                              className={`truncate ${
-                                isAITargetCol ? "font-bold text-yellow-700" : ""
-                              }`}
-                            >
-                              {col.name}
-                              {isAITargetCol && (
-                                <span className="ml-1 animate-bounce">←</span>
-                              )}
-                            </span>
-                          )}
-                        </label>
-                      </li>
-                    );
-                  })}
-              </ul>
+    return {
+      id: tableName,
+      position: { x, y },
+      type: "default",
+      data: {
+        label: (
+          <div className={`bg-white text-xs max-w-[240px] border border-gray-300 rounded-lg shadow p-2 ${
+            spotlightTarget === 'table-node' && isActiveNode ? 'spotlight-table-node' : ''
+          }`}>
+            <div className="flex items-center mb-1 justify-between">
+              <strong
+                onClick={() => handleOpenModal(tableName)}
+                className={`block hover:text-blue-500 cursor-pointer truncate ${
+                  isAIProcessing && aiTargetTable === tableName
+                    ? "text-blue-700 font-bold"
+                    : isActiveNode && isAIProcessing
+                    ? "text-green-700 font-bold"
+                    : ""
+                }`}
+              >
+                {tableName}
+                {isAIProcessing && aiTargetTable === tableName && (
+                  <span className="ml-1 text-blue-600 animate-pulse">⚡</span>
+                )}
+                {isActiveNode && isAIProcessing && (
+                  <span className="ml-1 text-green-600 animate-bounce">🎯</span>
+                )}
+              </strong>
             </div>
-          ),
-        },
-      };
-    },
-    [tables, columnSearches, isAIProcessing, aiTargetTable, aiTargetColumn]
-  );
+            <div className="flex items-center mb-2 gap-1">
+              <input
+                type="text"
+                placeholder="Search columns"
+                className="w-full px-1 py-0.5 text-[11px] border border-gray-300 rounded"
+                value={search}
+                onChange={(e) =>
+                  handleSearchChange(tableName, e.target.value)
+                }
+                disabled={isAIProcessing}
+              />
+            </div>
+            <ul className="max-h-[150px] overflow-y-auto scrollsettings space-y-1 pr-1">
+              {table.columns
+                .filter(
+                  (col) =>
+                    col.name.toLowerCase() !== "id" &&
+                    (!search ||
+                      col.name.toLowerCase().includes(search.toLowerCase()))
+                )
+                .map((col) => {
+                  const isAITargetCol =
+                    isAIProcessing && aiTargetColumn === col.name && isActiveNode;
+                  const isSelected = selectedCols.includes(col.name);
+
+                  return (
+                    <li
+                      key={col.name}
+                      className={`flex items-center justify-between transition-all duration-300 ${
+                        isAITargetCol
+                          ? "bg-gradient-to-r from-yellow-200 to-yellow-300 border-2 border-yellow-500 rounded px-1 animate-pulse shadow-lg transform scale-105"
+                          : ""
+                      }`}
+                    >
+                      <label className="flex items-center space-x-1">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => handleColumnToggle(tableName, col)}
+                          disabled={isAIProcessing}
+                          className={isAITargetCol ? "accent-yellow-500" : ""}
+                        />
+                        {col.relation ? (
+                          <span
+                            className={`text-blue-600 truncate ${
+                              isAITargetCol ? "font-bold text-yellow-700" : ""
+                            }`}
+                          >
+                            {col.name}
+                            {isAITargetCol && (
+                              <span className="ml-1 animate-bounce">⚡</span>
+                            )}
+                          </span>
+                        ) : (
+                          <span
+                            className={`truncate ${
+                              isAITargetCol ? "font-bold text-yellow-700" : ""
+                            }`}
+                          >
+                            {col.name}
+                            {isAITargetCol && (
+                              <span className="ml-1 animate-bounce">⚡</span>
+                            )}
+                          </span>
+                        )}
+                      </label>
+                    </li>
+                  );
+                })}
+            </ul>
+          </div>
+        ),
+      },
+    };
+  },
+  [tables, columnSearches, isAIProcessing, aiTargetTable, aiTargetColumn, activeTableNode, spotlightTarget]
+);
 
   // Add a table node
   const addTable = (tableName) => {
@@ -1626,7 +1717,7 @@ function Home() {
         {/* Floating Panel */}
         {activePanel && (
           <div
-            className="fixed w-[280px] left-[70px] h-[80vh] z-40 top-[55px] rounded-lg overflow-hidden drop-shadow-xl flex bg-opacity-50"
+            className="fixed w-[280px] left-[70px] z-40 top-[55px] rounded-lg overflow-hidden drop-shadow-xl flex bg-opacity-50"
             onClick={() => setActivePanel(null)}
           >
             <div
@@ -1652,17 +1743,19 @@ function Home() {
                 {activePanel === "tables" ? (
                   <div className="relative">
                     <input
-                      type="text"
-                      placeholder="Search tables..."
-                      value={tablesSearch}
-                      onChange={(e) => setTablesSearch(e.target.value)}
-                      className={`w-full px-2 py-1 text-sm border rounded transition-all duration-300 ${
-                        isAIProcessing && currentAIStep === 1 && aiTargetTable
-                          ? "border-blue-500 bg-blue-50 ring-2 ring-blue-200 animate-pulse"
-                          : "border-gray-300"
-                      }`}
-                      disabled={isAIProcessing}
-                    />
+  type="text"
+  placeholder="Search tables..."
+  value={tablesSearch}
+  onChange={(e) => setTablesSearch(e.target.value)}
+  className={`w-full px-2 py-1 text-sm border rounded transition-all duration-300 ${
+    spotlightTarget === 'search-input'
+      ? "spotlight-search-input"
+      : isAIProcessing && currentAIStep === 1 && aiTargetTable
+      ? "border-blue-500 bg-blue-50 ring-2 ring-blue-200 animate-pulse"
+      : "border-gray-300"
+  }`}
+  disabled={isAIProcessing}
+/>
                     {isAIProcessing && currentAIStep === 1 && aiTargetTable && (
                       <div className="absolute right-2 top-1/2 transform -translate-y-1/2">
                         <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
@@ -1678,9 +1771,7 @@ function Home() {
                     className="w-full px-2 py-1 text-sm border border-gray-300 rounded"
                   />
                 ) : (
-                  <div className="text-sm text-gray-500">
-                    Choose a report type below.
-                  </div>
+                  <>  </>
                 )}
               </div>
               <div className="p-2 overflow-y-auto flex-1 scrollsettings">
@@ -1797,109 +1888,177 @@ function Home() {
                   </div>
                 )}
 
-                {activePanel === "agent" && (
-                  <div className="space-y-3">
-                    <div className="p-3 border border-gray-200 rounded">
-                      <p className="text-sm mb-2">Select a preset</p>
+               {activePanel === "agent" && (
+  <div className="space-y-3">
+    <div className="p-3 border border-gray-200 rounded">
+      <div className="flex items-center gap-2 mb-3">
+        <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+          <FiCpu size={16} className="text-white" />
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-gray-800">AI Automation Templates</p>
+          <p className="text-xs text-gray-500">Select a pre-configured dataset template</p>
+        </div>
+      </div>
 
-                      {presetsLoading && (
-                        <div className="space-y-2">
-                          {Array.from({ length: 4 }).map((_, i) => (
-                            <div
-                              key={i}
-                              className="h-7 rounded bg-gray-100 animate-pulse"
-                            />
-                          ))}
-                        </div>
-                      )}
+      {presetsLoading && (
+        <div className="space-y-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div
+              key={i}
+              className="h-16 rounded-lg bg-gradient-to-r from-gray-100 to-gray-200 animate-pulse"
+            />
+          ))}
+        </div>
+      )}
 
-                      {!presetsLoading && presetsError && (
-                        <div className="text-sm text-red-600">
-                          {presetsError}
-                          <button
-                            onClick={() => {
-                              setPresetsLoading(true);
-                              setPresetsError(null);
-                              fetch(
-                                "https://demo.techfinna.com/api/datasets/presets/"
-                              )
-                                .then((r) => r.json())
-                                .then((d) => {
-                                  const keys = Array.isArray(d?.presets)
-                                    ? d.presets
-                                        .map((p) => p.key)
-                                        .filter(Boolean)
-                                    : [];
-                                  setPresetKeys(keys);
-                                })
-                                .catch((err) => {
-                                  console.error("Failed to load presets:", err);
-                                  setPresetsError("Failed to load presets");
-                                  setPresetKeys([]);
-                                })
-                                .finally(() => setPresetsLoading(false));
-                            }}
-                            className="ml-2 px-2 py-1 text-xs bg-gray-200 rounded"
-                          >
-                            Retry
-                          </button>
-                        </div>
-                      )}
+      {!presetsLoading && presetsError && (
+        <div className="text-sm text-red-600 bg-red-50 p-3 rounded-lg border border-red-200">
+          <div className="flex items-center gap-2">
+            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+            </svg>
+            <span>{presetsError}</span>
+          </div>
+          <button
+            onClick={() => {
+              setPresetsLoading(true);
+              setPresetsError(null);
+              fetch("https://demo.techfinna.com/api/datasets/presets/")
+                .then((r) => r.json())
+                .then((d) => {
+                  const presets = Array.isArray(d?.presets) ? d.presets : [];
+                  setPresetKeys(presets);
+                })
+                .catch((err) => {
+                  console.error("Failed to load presets:", err);
+                  setPresetsError("Failed to load presets");
+                  setPresetKeys([]);
+                })
+                .finally(() => setPresetsLoading(false));
+            }}
+            className="mt-2 px-3 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-700 rounded transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
-                      {!presetsLoading &&
-                        !presetsError &&
-                        presetKeys.length === 0 && (
-                          <div className="text-sm text-gray-500">
-                            No presets found.
-                          </div>
-                        )}
+      {!presetsLoading && !presetsError && presetKeys.length === 0 && (
+        <div className="text-sm text-gray-500 bg-gray-50 p-4 rounded-lg border border-gray-200 text-center">
+          <div className="w-12 h-12 mx-auto mb-2 bg-gray-200 rounded-full flex items-center justify-center">
+            <FiDatabase size={20} className="text-gray-400" />
+          </div>
+          <p>No templates available</p>
+          <p className="text-xs mt-1">Check back later for new templates</p>
+        </div>
+      )}
 
-                      {!presetsLoading &&
-                        !presetsError &&
-                        presetKeys.length > 0 && (
-                          <div className="space-y-1">
-                            {presetKeys.map((k) => (
-                              <label
-                                key={k}
-                                className="flex items-center gap-2 py-1 cursor-pointer hover:bg-gray-50 rounded px-2"
-                              >
-                                <input
-                                  type="radio"
-                                  name="agent-report"
-                                  value={k}
-                                  checked={selectedReport === k}
-                                  onChange={() => setSelectedReport(k)}
-                                />
-                                <span className="truncate">{k}</span>
-                              </label>
-                            ))}
-                          </div>
-                        )}
+      {!presetsLoading && !presetsError && presetKeys.length > 0 && (
+        <div className="space-y-2 max-h-80 overflow-y-auto scrollsettings">
+          {presetKeys.map((preset, index) => {
+            const gradients = [
+              'from-blue-500 to-cyan-500',
+              'from-purple-500 to-pink-500', 
+              'from-green-500 to-emerald-500',
+              'from-orange-500 to-red-500',
+              'from-indigo-500 to-purple-500',
+              'from-teal-500 to-blue-500',
+              'from-pink-500 to-rose-500',
+              'from-yellow-500 to-orange-500'
+            ];
+            
+            const icons = [
+              { icon: '📊', bg: 'bg-blue-100' },
+              { icon: '💰', bg: 'bg-green-100' },
+              { icon: '📦', bg: 'bg-orange-100' },
+              { icon: '🛒', bg: 'bg-purple-100' },
+              { icon: '🏪', bg: 'bg-pink-100' },
+              { icon: '👥', bg: 'bg-cyan-100' },
+              { icon: '🏭', bg: 'bg-gray-100' },
+              { icon: '⚡', bg: 'bg-yellow-100' }
+            ];
+
+            const gradient = gradients[index % gradients.length];
+            const iconData = icons[index % icons.length];
+            
+            return (
+              <div
+                key={preset.key}
+                onClick={async () => {
+                  setActivePanel(null);
+                  toast.info(`Starting AI automation: ${preset.title}`, { autoClose: 2000 });
+                  await simulateAITableSelectionFromPreset(preset.key);
+                }}
+                className={`
+                  relative overflow-hidden cursor-pointer rounded-lg border border-gray-200 
+                  hover:border-gray-300 hover:shadow-lg bg-white
+                `}
+              >
+                {/* Gradient Background */}
+                <div className={`absolute inset-0 bg-gradient-to-r ${gradient} opacity-0 group-hover:opacity-10 transition-opacity duration-300`} />
+                
+                {/* Content */}
+                <div className="relative p-4">
+                  <div className="flex items-center gap-3">
+                    {/* Icon */}
+                    <div className={`w-12 h-12 ${iconData.bg} rounded-xl flex items-center justify-center text-xl transition-transform group-hover:scale-110`}>
+                      {iconData.icon}
                     </div>
-
-                    <button
-                      onClick={async () => {
-                        if (!selectedReport) {
-                          toast.error("Please choose a preset");
-                          return;
-                        }
-                        // TODO: wire your navigation/API call here using `selectedReport`
-                        setActivePanel(null);
-                        toast.info(
-                          `Starting AI automation for: ${selectedReport}`,
-                          { autoClose: 2000 }
-                        );
-                        await simulateAITableSelectionFromPreset(
-                          selectedReport
-                        );
-                      }}
-                      className="w-full bg-blue-600 text-white px-3 py-2 rounded shadow disabled:bg-gray-400"
-                      disabled={!selectedReport}
-                    >
-                      Continue
-                    </button>
+                    
+                    {/* Text Content */}
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-semibold text-gray-800 text-sm group-hover:text-gray-900 transition-colors truncate">
+                        {preset.title}
+                      </h4>
+                      <p className="text-xs text-gray-500 mt-1 group-hover:text-gray-600 transition-colors">
+                        {preset.key.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')} • Auto-configured
+                      </p>
+                    </div>
+                    
+                    {/* Arrow Icon */}
+                    <div className="text-gray-400 group-hover:text-gray-600 transform group-hover:translate-x-1 transition-all duration-300">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                    </div>
                   </div>
-                )}
+                  
+                  {/* Progress indicator when processing */}
+                  {isAIProcessing && selectedReport === preset.key && (
+                    <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-200">
+                      <div className="h-full bg-gradient-to-r from-blue-500 to-cyan-500 animate-pulse" style={{ width: '60%' }} />
+                    </div>
+                  )}
+                </div>
+                
+                {/* Shine effect on hover */}
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white to-transparent opacity-0 group-hover:opacity-20 transform -skew-x-12 -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+
+    {/* Info Section */}
+    <div className="p-3 bg-gradient-to-r from-blue-50 to-cyan-50 border border-blue-200 rounded-lg">
+      <div className="flex items-start gap-2">
+        <div className="w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center mt-0.5">
+          <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+          </svg>
+        </div>
+        <div className="flex-1">
+          <p className="text-xs font-medium text-blue-800">AI Automation</p>
+          <p className="text-xs text-blue-600 mt-1">
+            Templates automatically select and configure tables and columns for instant dataset creation.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
               </div>
             </div>
           </div>
@@ -1958,6 +2117,7 @@ function Home() {
           <ReactFlow
             nodes={nodes}
             edges={edges}
+            onInit={onInit}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onNodeDragStop={onNodeDragStop}
