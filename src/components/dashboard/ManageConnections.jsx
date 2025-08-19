@@ -48,6 +48,7 @@ export default function DatabaseConnections() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingConnection, setEditingConnection] = useState(null);
   const navigate = useNavigate();
+  const [schemasByConn, setSchemasByConn] = useState({});
 
   // 1) initial load
   useEffect(() => {
@@ -92,14 +93,12 @@ export default function DatabaseConnections() {
       return;
     }
     localStorage.setItem("db_token", conn.token);
+    const selectedSchema = schemasByConn[conn.id]?.selected || null;
+    if (selectedSchema) {
+      localStorage.setItem("db_schema", selectedSchema);
+    }
     toast.success(`Selected ${conn.host}! Redirecting…`);
     setTimeout(() => navigate("/create-dataset"), 2000);
-  };
-
-  // 3) edit stub
-  const handleEdit = (conn) => {
-    setEditingConnection(conn);
-    setIsFormOpen(true);
   };
 
   // 4) delete locally filter out instead of full reload
@@ -134,7 +133,46 @@ export default function DatabaseConnections() {
     }
   };
 
-  // Always render ToastContainer
+ // ADD: when `connections` are loaded/changed, fetch schema for each connection's token
+useEffect(() => {
+  const accessToken = localStorage.getItem("accessToken");
+  if (!accessToken || !Array.isArray(connections) || connections.length === 0) return;
+
+  (async () => {
+    for (const conn of connections) {
+      try {
+        const res = await fetch(`${authUrl.BASE_URL}/db_connector/schema/`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ db_token: conn.token }), // send in payload
+        });
+
+        const json = await res.json();
+        const list = json?.data?.schemas || [];
+        setSchemasByConn((prev) => ({
+          ...prev,
+          [conn.id]: {
+            list,
+            selected: prev[conn.id]?.selected ?? (list[0] || ""),
+          },
+        }));
+        console.log(
+          `Schema API response for connection id=${conn.id} host=${conn.host}:`,
+          json
+        );
+      } catch (err) {
+        console.error(
+          `Schema API error for connection id=${conn.id} host=${conn.host}:`,
+          err
+        );
+      }
+    }
+  })();
+}, [connections]);
+
   return (
     <>
       {isLoading ? (
@@ -247,6 +285,37 @@ export default function DatabaseConnections() {
                           Created{" "}
                           {new Date(conn.created_at).toLocaleDateString()}
                         </div>
+                        {/* ADD: Schema selector (per connection) */}
+<div className="mt-3 flex flex-wrap gap-2 justify-start items-center" onClick={(e) => e.stopPropagation()}>
+  <label className="block text-xs text-gray-500 mb-1">Schema</label>
+  <select
+    className="w-fit border rounded px-2 py-1 text-sm"
+    value={
+      (schemasByConn[conn.id]?.selected) ??
+      (schemasByConn[conn.id]?.list?.[0] || "")
+    }
+    onChange={(e) =>
+      setSchemasByConn((prev) => ({
+        ...prev,
+        [conn.id]: {
+          list: prev[conn.id]?.list || [],
+          selected: e.target.value,
+        },
+      }))
+    }
+    disabled={!schemasByConn[conn.id]?.list || (schemasByConn[conn.id]?.list?.length ?? 0) === 0}
+  >
+    {(schemasByConn[conn.id]?.list || []).map((s) => (
+      <option key={s} value={s}>
+        {s}
+      </option>
+    ))}
+  </select>
+  {!schemasByConn[conn.id]?.list && (
+    <div className="text-xs text-gray-400 mt-1">Fetching schemas…</div>
+  )}
+</div>
+
                       </div>
                     </div>
                   </motion.div>

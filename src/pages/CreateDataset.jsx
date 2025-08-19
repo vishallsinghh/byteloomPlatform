@@ -68,8 +68,6 @@ const [spotlightTarget, setSpotlightTarget] = useState(null); // 'search-input' 
 const [activeTableNode, setActiveTableNode] = useState(null); // table name currently being processed
 const [initialViewport, setInitialViewport] = useState(null); // Store initial canvas position
 
-
-
   const resizerRef = useRef(null);
   // Add this ref to track tables state changes
   const tablesRef = useRef(tables);
@@ -310,9 +308,11 @@ const simulateAITableSelectionFromPreset = async (presetKey) => {
     await new Promise((r) => setTimeout(r, 300));
 
     toast.success(
-      "AI automation completed! All tables and columns selected.",
+      "All tables and columns selected.",
       { autoClose: 3000 }
     );
+
+    
   } catch (error) {
     console.error("AI automation failed:", error);
     toast.error("Failed to complete AI automation");
@@ -588,23 +588,6 @@ useEffect(() => {
   }
 }, [activePanel]);
 
-  // fetch preset key data tables
-  const fetchPresetDetails = (key) => {
-    console.log("Fetching preset:", key);
-    fetch(
-      `https://demo.techfinna.com/api/datasets/presets/${encodeURIComponent(
-        key
-      )}`
-    )
-      .then((r) => r.json())
-      .then((d) => {
-        console.log("Preset response:", d);
-      })
-      .catch((err) => {
-        console.error("Preset fetch failed:", err);
-        toast.error("Failed to fetch preset details");
-      });
-  };
 
   // Add this at the top of your Home component, after the imports
  useEffect(() => {
@@ -759,6 +742,14 @@ useEffect(() => {
     const authCheck = ensureAuthOrRedirect({ requireDB: true });
     if (!authCheck.ok) return;
     console.log(`Fetching metadata for table: ${tableName}`);
+
+    const schema = localStorage.getItem("db_schema");
+
+    if (!schema) {
+      toast.error("Schema is missing. Delete this connection and create a new one.");
+      clearLocalTokens();
+      return { ok: false };
+    }
     setTablesLoading(true);
     try {
       const { res, json } = await apiFetch(
@@ -767,6 +758,7 @@ useEffect(() => {
           method: "POST",
           body: JSON.stringify({
             db_token: authCheck.dbToken,
+            schema: schema,
             table_name: tableName,
           }),
         }
@@ -1113,7 +1105,6 @@ const generateNode = useCallback(
     setActivePanel(null);
   };
 
-  // Submit preview
   // Updated handleSubmit function with debugging and fixes
   const handleSubmit = async () => {
     // ✅ guard: redirect if tokens missing
@@ -1148,10 +1139,17 @@ const generateNode = useCallback(
       toast.error("Please select at least one table with columns");
       return;
     }
+ const schema = localStorage.getItem("db_schema");
 
-    const payload = { selected_columns: output, db_token: authCheck.dbToken };
+    if (!schema) {
+      toast.error("Schema is missing. Delete this connection and create a new one.");
+      clearLocalTokens();
+      return { ok: false };
+    }
+    const payload = { selected_columns: output, db_token: authCheck.dbToken, schema: schema };
 
     console.log("Payload being sent:", payload);
+    
 
     try {
       setpageLoading(true);
@@ -1283,11 +1281,18 @@ const generateNode = useCallback(
 
       selectedColumns[tableName] = [...regularCols, ...relationCols];
     });
+const schema = localStorage.getItem("db_schema");
 
+    if (!schema) {
+      toast.error("Schema is missing. Delete this connection and create a new one.");
+      clearLocalTokens();
+      return { ok: false };
+    }
     const payload = {
       db_token: authCheck.dbToken,
       table_name: name.toLowerCase().replace(/\s+/g, "_"),
       selected_columns: selectedColumns,
+      schema:schema,
     };
 
     console.log("Payload being sent to field_mapping:", payload);
@@ -1315,12 +1320,20 @@ const generateNode = useCallback(
           setSql(json.sql_query);
         }
         setOpenModal("response");
+        const schema = localStorage.getItem("db_schema");
+
+    if (!schema) {
+      toast.error("Schema is missing. Delete this connection and create a new one.");
+      clearLocalTokens();
+      return { ok: false };
+    }
 
         if (json.id && json.created_table_name) {
           try {
             const generatePayload = {
               db_token: authCheck.dbToken,
               table_name: json.created_table_name,
+              schema:schema
             };
 
             console.log(
