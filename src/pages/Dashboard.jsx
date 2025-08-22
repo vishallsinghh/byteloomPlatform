@@ -26,6 +26,11 @@ export default function Dashboard() {
         }
   }, []);
 
+  useEffect(() => {
+    localStorage.removeItem("db_token");
+    localStorage.removeItem("db_schema");
+  }, []);
+
   const handleTourComplete = () => {
     setShowTour(false);
     localStorage.setItem("dashboard-tour-completed", "true");

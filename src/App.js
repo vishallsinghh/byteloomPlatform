@@ -29,7 +29,7 @@ function App() {
 
       {/* Protected */}
       <Route element={<ProtectedRoute />}>
-        <Route index element={<Navigate to="/create-dataset" replace />} />
+        <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/create-dataset" element={<CreateDataset />} />
         <Route path="/gallery" element={<Gallery />} />
