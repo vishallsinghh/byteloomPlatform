@@ -10,7 +10,7 @@ export default function Navbar() {
 
   const links = [
     { to: "/create-dataset", label: "Create Dataset" },
-    { to: "/gallery", label: "Gallery" },
+    
     { to: "/dashboards", label: "Dashboards" },
   ];
 
