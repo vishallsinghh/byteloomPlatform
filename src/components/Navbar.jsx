@@ -49,7 +49,7 @@ export default function Navbar() {
               to="/dashboard"
               className="bg-sky-600 text-white hover:bg-sky-700 px-3 py-1 rounded"
             >
-              Go To Dashboard
+              Go To Connections
             </Link>
           </div>
 

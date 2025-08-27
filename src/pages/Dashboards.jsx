@@ -33,7 +33,7 @@ const Dashboards = () => {
         return;
       }
     try {
-      const res = await fetch(`${authUrl.BASE_URL}/dashboard/layout/info`,{
+      const res = await fetch(`${authUrl.BASE_URL}/dataset/info`,{
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -69,7 +69,7 @@ const deleteDashboard = async (id, dashboardName) => {
   }
 
   try {
-    const resp = await fetch(`${authUrl.BASE_URL}/dashboard/delete/layout/${id}`, { 
+    const resp = await fetch(`${authUrl.BASE_URL}/dataset/delete/${id}`, { 
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',
@@ -103,20 +103,20 @@ const deleteDashboard = async (id, dashboardName) => {
           <div className="p-6 text-center text-red-500">{error}</div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
-            <Link to="/create-dashboard">
+            {/* <Link to="/create-dashboard">
               <div className="border border-dashed border-gray-300 p-6 rounded-lg bg-gray-100 cursor-pointer hover:scale-105 duration-200 group shadow-md flex items-center justify-center sm:h-[200px] w-full md:h-64">
                 <IoAdd
                   className="text-gray-400 group-hover:bg-gray-200 group-hover:text-gray-800 duration-200 ease-in-out rounded-full"
                   size={60}
                 />
               </div>
-            </Link>
+            </Link> */}
 
             {allDashboards.map((d) => (
               <Link key={d.id} to={`/view-dashboard?id=${d.id}`}>
                 <div className="border border-dashed relative border-gray-300 z-10 p-6 rounded-lg bg-gray-100 flex items-center justify-center group shadow-md cursor-pointer hover:scale-105 duration-200 sm:h-[200px] w-full md:h-64">
                   {/* Edit button */}
-                  <button
+                  {/* <button
                     onClick={(e) => {
                       e.preventDefault()
                       e.stopPropagation()
@@ -126,7 +126,7 @@ const deleteDashboard = async (id, dashboardName) => {
                     title="Edit Dashboard"
                   >
                     <FiEdit size={20} className="text-gray-600" />
-                  </button>
+                  </button> */}
 
                   {/* Delete button */}
                   <button
@@ -142,7 +142,7 @@ const deleteDashboard = async (id, dashboardName) => {
                   </button>
 
                   <span className="text-2xl font-bold first-letter:uppercase text-center text-gray-800">
-                    {d.name}
+                    {d.dataset_name}
                   </span>
                 </div>
               </Link>

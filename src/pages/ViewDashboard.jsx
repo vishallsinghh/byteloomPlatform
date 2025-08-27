@@ -24,6 +24,12 @@ import {
   FiSearch,
   FiChevronDown,
   FiSettings,
+   FiTrendingUp, // ADD THIS
+  FiBarChart, // ADD THIS
+  FiPieChart, // ADD THIS
+  FiCode, // ADD THIS
+  FiMessageSquare,
+  FiSend,
 } from "react-icons/fi"
 import { FaSort, FaSortUp, FaSortDown } from "react-icons/fa"
 
@@ -480,6 +486,12 @@ function buildChartOptions(chart, colorOffset = 0, useStock = false) {
 // Normalize layout coordinates
 function normalizeRglLayout(baseWidgets) {
   if (!Array.isArray(baseWidgets) || baseWidgets.length === 0) return []
+  
+  // Check if we need to add spacing (when all widgets are at same position)
+  const positions = baseWidgets.map(w => `${w.layout?.x ?? 0},${w.layout?.y ?? 0}`)
+  const uniquePositions = new Set(positions)
+  const needsSpacing = uniquePositions.size === 1 && positions[0] === "0,0"
+  
   const xs = baseWidgets.map(w => Number(w.layout?.x ?? 0))
   const ys = baseWidgets.map(w => Number(w.layout?.y ?? 0))
   const hasZeroX = xs.some(v => v === 0)
@@ -487,15 +499,20 @@ function normalizeRglLayout(baseWidgets) {
   const minX = Math.min(...xs)
   const minY = Math.min(...ys)
   const looksOneBased = !hasZeroX && !hasZeroY && (minX >= 1 || minY >= 1)
-  return baseWidgets.map(w => {
+  
+  return baseWidgets.map((w, index) => {
     const x = Number(w.layout?.x ?? 0)
     const y = Number(w.layout?.y ?? 0)
+    // Generate a unique key if it doesn't exist
+    const widgetKey = w.key || `${w.type}-${w.id}`
+    
     return {
       ...w,
+      key: widgetKey,
       layout: {
-        i: w.key,
+        i: widgetKey,
         x: looksOneBased ? Math.max(0, x - 1) : x,
-        y: looksOneBased ? Math.max(0, y - 1) : y,
+        y: looksOneBased ? Math.max(0, y - 1) : (needsSpacing ? y + (index * 4) : y),
         w: Number(w.layout?.w ?? 4),
         h: Number(w.layout?.h ?? 4),
       },
@@ -582,6 +599,24 @@ export default function ViewDashboard() {
   const [explainResponse, setExplainResponse] = useState(null)
   const [explainError, setExplainError] = useState(null)
 
+  // chatbot states
+    const [activePanel, setActivePanel] = useState(null);
+    const [showChatbot, setShowChatbot] = useState(false);
+    const [chatMessages, setChatMessages] = useState([]);
+    const [chatInput, setChatInput] = useState("");
+    const [isTyping, setIsTyping] = useState(false);
+    const [showSuggestions, setShowSuggestions] = useState(true);
+    const [selectedName, setSelectedName] = useState("dataaaaa");
+  const [selectedId, setSelectedId] = useState(null);
+  // Data fetched from API
+  const [datasets, setDatasets] = useState([]);
+  const [charts, setCharts] = useState([]);
+  const [kpis, setKpis] = useState([]);
+  const [loadingDatasets, setLoadingDatasets] = useState(true);
+  const [loadingDetails, setLoadingDetails] = useState(false); // charts & KPIs
+      const selectedNameRef = useRef("dataaaaa");
+      const chatMessagesEndRef = useRef(null);
+    const [secureDatasetName, setSecureDatasetName] = useState('')
   // Close kebab on outside click
   useEffect(() => {
     const close = () => setMenuOpenFor(null)
@@ -604,107 +639,130 @@ export default function ViewDashboard() {
   }, [modalOpen])
 
   // Load dashboard and widgets
-  const loadAll = useCallback(async () => {
-    if (!id || !token || !dbToken) {
-      setError('Missing authentication or dashboard ID')
-      setLoading(false)
-      return
-    }
+ const loadAll = useCallback(async () => {
+ if (!id || !token || !dbToken) {
+   setError('Missing authentication or dashboard ID')
+   setLoading(false)
+   return
+ }
 
-    setLoading(true)
-    setError(null)
+ setLoading(true)
+ setError(null)
 
-    try {
-      // Fetch dashboard layout
-      const layoutRes = await fetch(`${authUrl.BASE_URL}/dashboard/layout/${id}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        }
-      })
+ try {
+   // Fetch dashboard layout
+   const layoutRes = await fetch(`${authUrl.BASE_URL}/dataset/layout/${id}`, {
+     method: 'GET',
+     headers: {
+       'Content-Type': 'application/json',
+       'Authorization': `Bearer ${token}`,
+     }
+   })
 
-      if (!layoutRes.ok) throw new Error(`Dashboard layout fetch failed: ${layoutRes.status}`)
-      const layoutJson = await layoutRes.json()
+   if (!layoutRes.ok) throw new Error(`Dashboard layout fetch failed: ${layoutRes.status}`)
+   const layoutJson = await layoutRes.json()
 
-      if (!layoutJson.success) throw new Error(layoutJson.message || 'Failed to load dashboard')
+   if (!layoutJson.success) throw new Error(layoutJson.message || 'Failed to load dashboard')
 
-      setDashboardName(layoutJson.name || `Dashboard #${id}`)
-      const baseWidgets = layoutJson.widgets || []
+   // Store dataset_name securely from the API response
+   if (layoutJson.dataset_name) {
+     setSecureDatasetName(layoutJson.dataset_name)
+   }
 
-      // Normalize layout
-      const normalizedWidgets = normalizeRglLayout(baseWidgets)
+   setDashboardName(layoutJson.name || `Dashboard #${id}`)
+   const baseWidgets = layoutJson.widgets || []
 
-      // Fetch widget data
-      const widgetPromises = normalizedWidgets.map(async widget => {
-        try {
-          let endpoint, body
-          if (widget.type === 'chart') {
-            endpoint = `${authUrl.BASE_URL}/dataset/chart/${widget.id}/data/`
-          } else {
-            endpoint = `${authUrl.BASE_URL}/dataset/kpi/${widget.id}/data/`
-          }
+   // Normalize layout
+   const normalizedWidgets = normalizeRglLayout(baseWidgets)
 
-          const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({ db_token: dbToken })
-          })
+   // Fetch widget data
+   const widgetPromises = normalizedWidgets.map(async widget => {
+     try {
+       let endpoint, body
+       if (widget.type === 'chart') {
+         endpoint = `${authUrl.BASE_URL}/dataset/chart/${widget.id}/data/`
+       } else {
+         endpoint = `${authUrl.BASE_URL}/dataset/kpi/${widget.id}/data/`
+       }
 
-          if (!response.ok) throw new Error(`Widget ${widget.id} fetch failed`)
-          const result = await response.json()
+       const response = await fetch(endpoint, {
+         method: 'POST',
+         headers: {
+           'Content-Type': 'application/json',
+           'Authorization': `Bearer ${token}`
+         },
+         body: JSON.stringify({ db_token: dbToken })
+       })
 
-          if (!result.success) throw new Error(result.message || 'Failed to load widget')
+       if (!response.ok) throw new Error(`Widget ${widget.id} fetch failed`)
+       const result = await response.json()
 
-          return { ...widget, data: result.data }
-        } catch (err) {
-          console.error(`Error fetching widget ${widget.id}:`, err)
-          return null
-        }
-      })
+       if (!result.success) throw new Error(result.message || 'Failed to load widget')
 
-      const widgetResults = await Promise.all(widgetPromises)
-      const validWidgets = widgetResults.filter(w => {
-        if (!w) return false
-        if (w.type === 'chart') {
-          return isValidChartData(w.data) && chartHasData(w.data)
-        }
-        return isValidKpiData(w.data)
-      })
+       return { ...widget, data: result.data }
+     } catch (err) {
+       console.error(`Error fetching widget ${widget.id}:`, err)
+       return null
+     }
+   })
 
-      setWidgets(validWidgets)
+   const widgetResults = await Promise.all(widgetPromises)
+   const validWidgets = widgetResults.filter(w => {
+     if (!w) return false
+     if (w.type === 'chart') {
+       return isValidChartData(w.data) && chartHasData(w.data)
+     }
+     return isValidKpiData(w.data)
+   })
 
-      // Fetch datatype info for filters
-      try {
-        const dtRes = await fetch(`${authUrl.BASE_URL}/dashboard/datatype/${id}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-        if (dtRes.ok) {
-          const dt = await dtRes.json()
-          if (Array.isArray(dt?.data)) {
-            setFields(dt.data)
-            const firstNonDate = dt.data.find(
-              f => categorizeColumnType(f.column_type) !== 'date'
-            )
-            setSelectedField(firstNonDate?.filtered_column_name || null)
-          }
-        }
-      } catch (err) {
-        console.warn('Could not fetch datatype info:', err)
-      }
+   setWidgets(validWidgets)
 
-      setServerRangeActive(false)
-    } catch (err) {
-      console.error('Dashboard fetch error:', err)
-      setError(err.message || 'Failed to load dashboard')
-    } finally {
-      setLoading(false)
-    }
-  }, [id, token, dbToken])
+   const schema = localStorage.getItem("db_schema");
+         if (!schema) {
+           toast.error(
+             "Schema is missing. Delete this connection and create a new one."
+           );
+           return;
+         }
+   
+   const payload ={
+      db_token: dbToken,
+      dataset_id: id,
+      schema: schema
+   }
 
+   // Fetch datatype info for filters
+   try {
+     const dtRes = await fetch(`${authUrl.BASE_URL}/dataset/dashboard/datatype/`, {
+      method: 'POST',
+      headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+       body: JSON.stringify(payload)
+     })
+     if (dtRes.ok) {
+       const dt = await dtRes.json()
+       if (Array.isArray(dt?.data)) {
+         setFields(dt.data)
+         const firstNonDate = dt.data.find(
+           f => categorizeColumnType(f.column_type) !== 'date'
+         )
+         setSelectedField(firstNonDate?.filtered_column_name || null)
+       }
+     }
+   } catch (err) {
+     console.warn('Could not fetch datatype info:', err)
+   }
+
+   setServerRangeActive(false)
+ } catch (err) {
+   console.error('Dashboard fetch error:', err)
+   setError(err.message || 'Failed to load dashboard')
+ } finally {
+   setLoading(false)
+ }
+}, [id, token, dbToken])
   useEffect(() => {
     loadAll()
   }, [loadAll])
@@ -774,6 +832,546 @@ export default function ViewDashboard() {
     return null
   }
 
+const handleSendMessage = async () => {
+  const inputElement = document.getElementById("aiInput");
+  const textToSend = inputElement.value.trim();
+  if (!textToSend) return;
+
+  const userMessage = {
+    id: Date.now().toString(),
+    text: textToSend,
+    isUser: true,
+    timestamp: new Date(),
+  };
+
+  setChatMessages((prev) => [...prev, userMessage]);
+  inputElement.value = ""; // Clear input
+  setShowSuggestions(false);
+  setIsTyping(true);
+
+  try {
+    const token = localStorage.getItem("accessToken");
+    if (!token) {
+      toast.error("Auth Error: No access token found.");
+      return;
+    }
+
+    const dbToken = localStorage.getItem("db_token");
+    if (!dbToken) {
+      toast.error("Auth Error: No DB token found.");
+      return;
+    }
+
+    // Use securely fetched dataset name from the layout API
+    const payload = {
+      db_token: dbToken,
+      dataset_name: secureDatasetName || dashboardName || `Dashboard ${id}`,
+      dataset_id: id, // Use dashboard ID from URL
+      message: textToSend,
+    };
+    
+    console.log("AI Chat payload:", payload);
+
+    const response = await fetch(
+      "https://backend.techfinna.com/chat_with_ai/chat/",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+
+    const result = await response.json();
+    setIsTyping(false);
+
+    const aiMessage = {
+      id: (Date.now() + 1).toString(),
+      text: result?.data?.response || result?.reply || "No response from AI.",
+      isUser: false,
+      timestamp: new Date(),
+      aiResponse: result,
+    };
+
+    setChatMessages((prev) => [...prev, aiMessage]);
+  } catch (err) {
+    console.error("AI Chat error:", err);
+    setIsTyping(false);
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        id: (Date.now() + 1).toString(),
+        text: "⚠️ Error contacting AI service.",
+        isUser: false,
+        timestamp: new Date(),
+      },
+    ]);
+  }
+};
+
+
+ const changeDataset = (id) => {
+    navigate(`/gallery?datasetId=${id}`);
+    selectDataset(id);
+  };
+  // Auto-scroll to bottom of chat messages
+  const scrollToBottom = () => {
+    chatMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+  // Enhanced AI Message Component
+    const renderAIMessage = (message) => {
+      const { intent, data } = message.aiResponse || {};
+  
+      switch (intent) {
+        case "greeting":
+          return (
+            <div className="space-y-2">
+              <div className="flex items-center space-x-2">
+                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                <span className="text-sm font-medium text-gray-700">
+                  Greeting
+                </span>
+              </div>
+              <p className="text-sm text-gray-700">{data?.response}</p>
+            </div>
+          );
+  
+        case "analyze_chart":
+          return (
+            <div className="space-y-3">
+              <div className="flex items-center space-x-2">
+                <FiPieChart className="text-blue-500" size={16} />
+                <span className="text-sm font-medium text-gray-700">
+                  Chart Analysis
+                </span>
+              </div>
+  
+              <div className="bg-blue-50 rounded-lg p-3 space-y-2">
+                <p className="text-sm text-gray-700">{data?.response}</p>
+  
+                {data?.data_insights && (
+                  <div className="space-y-2">
+                    <div className="text-xs font-medium text-gray-600">
+                      Key Insights:
+                    </div>
+                    <div className="text-xs text-gray-600">
+                      Total: {data.data_insights.total}
+                    </div>
+                    {data.data_insights.top_labels
+                      ?.slice(0, 3)
+                      .map((item, idx) => (
+                        <div
+                          key={idx}
+                          className="flex justify-between text-xs text-gray-600"
+                        >
+                          <span>{item.label}:</span>
+                          <span>
+                            {item.value} ({(item.percent * 100).toFixed(1)}%)
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                )}
+  
+                {data?.inference && (
+                  <div className="text-xs text-blue-700 italic border-l-2 border-blue-300 pl-2">
+                    {data.inference}
+                  </div>
+                )}
+              </div>
+  
+              {data?.suggestions && data.suggestions.length > 0 && (
+                <div className="space-y-1">
+                  <div className="text-xs font-medium text-gray-600">
+                    Suggestions:
+                  </div>
+                  {data.suggestions.map((suggestion, idx) => (
+                    <div
+                      key={idx}
+                      className="text-xs text-gray-600 flex items-start space-x-1"
+                    >
+                      <span className="text-green-500 mt-0.5">•</span>
+                      <span>{suggestion}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+  
+        case "analyze_kpi":
+          return (
+            <div className="space-y-3">
+              <div className="flex items-center space-x-2">
+                <FiTrendingUp className="text-green-500" size={16} />
+                <span className="text-sm font-medium text-gray-700">
+                  KPI Analysis
+                </span>
+              </div>
+  
+              <div className="bg-green-50 rounded-lg p-3 space-y-2">
+                <p className="text-sm text-gray-700">{data?.response}</p>
+  
+                {data?.sql_suggestion && (
+                  <div className="bg-gray-100 rounded p-2 text-xs font-mono text-gray-600">
+                    {data.sql_suggestion}
+                  </div>
+                )}
+              </div>
+  
+              {data?.suggestions && data.suggestions.length > 0 && (
+                <div className="space-y-1">
+                  <div className="text-xs font-medium text-gray-600">
+                    Recommendations:
+                  </div>
+                  {data.suggestions.map((suggestion, idx) => (
+                    <div
+                      key={idx}
+                      className="text-xs text-gray-600 flex items-start space-x-1"
+                    >
+                      <span className="text-green-500 mt-0.5">•</span>
+                      <span>{suggestion}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+  
+        case "create_kpi":
+          return (
+            <div className="space-y-3">
+              <div className="flex items-center space-x-2">
+                <FiTrendingUp className="text-purple-500" size={16} />
+                <span className="text-sm font-medium text-gray-700">
+                  KPI Creation
+                </span>
+              </div>
+  
+              <div className="bg-purple-50 rounded-lg p-3 space-y-2">
+                <div className="text-sm font-medium text-gray-800">
+                  {data?.kpi_name}
+                </div>
+                <p className="text-sm text-gray-700">{data?.expression}</p>
+  
+                {data?.sql_query && (
+                  <div className="bg-gray-100 rounded p-2 text-xs font-mono text-gray-600">
+                    {data.sql_query}
+                  </div>
+                )}
+              </div>
+  
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-2">
+                <div className="text-xs text-yellow-800">
+                  🚀 We're adding automatic KPI creation to your dashboard soon!
+                </div>
+              </div>
+            </div>
+          );
+  
+        case "create_chart":
+          return (
+            <div className="space-y-3">
+              <div className="flex items-center space-x-2">
+                <FiBarChart className="text-indigo-500" size={16} />
+                <span className="text-sm font-medium text-gray-700">
+                  Chart Creation
+                </span>
+              </div>
+  
+              <div className="bg-indigo-50 rounded-lg p-3 space-y-2">
+                <div className="flex items-center space-x-2">
+                  <span className="text-xs bg-indigo-200 text-indigo-800 px-2 py-1 rounded">
+                    {data?.chart_type?.toUpperCase()}
+                  </span>
+                </div>
+  
+                <div className="text-sm text-gray-700">
+                  <div>
+                    <strong>X-Axis:</strong> {data?.x_axis}
+                  </div>
+                  <div>
+                    <strong>Y-Axis:</strong> {data?.y_axis}
+                  </div>
+                </div>
+  
+                <p className="text-sm text-gray-600 italic">
+                  {data?.explanation}
+                </p>
+  
+                {data?.sql_query && (
+                  <div className="bg-gray-100 rounded p-2 text-xs font-mono text-gray-600">
+                    {data.sql_query}
+                  </div>
+                )}
+              </div>
+  
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-2">
+                <div className="text-xs text-yellow-800">
+                  🚀 Automatic chart creation feature coming soon to your
+                  dashboard!
+                </div>
+              </div>
+            </div>
+          );
+  
+        case "other":
+          return (
+            <div className="space-y-2">
+              <div className="flex items-center space-x-2">
+                <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
+                <span className="text-sm font-medium text-gray-700">
+                  General Query
+                </span>
+              </div>
+              <p className="text-sm text-gray-700">{data?.response}</p>
+              <div className="text-xs text-gray-500 italic">
+                For data-related questions, try asking about your charts or KPIs!
+              </div>
+            </div>
+          );
+  
+        default:
+          return <p className="text-sm text-gray-700">{message.text}</p>;
+      }
+    };
+  // Delete a dataset
+  const handleDeleteDataset = async (ds, e) => {
+    e.stopPropagation();
+    const { isConfirmed } = await Swal.fire({
+      title: `Delete dataset “${ds.name}”?`,
+      text: "This will remove all its charts permanently.",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "#d33",
+      cancelButtonColor: "#3085d6",
+      confirmButtonText: "Yes, delete it!",
+    });
+    if (!isConfirmed) return;
+    const token = localStorage.getItem("accessToken");
+    if (!token) {
+      toast.error("Auth Error: No access token found.");
+      return;
+    }
+    const dbToken = localStorage.getItem("db_token");
+    if (!dbToken) {
+      toast.error("Auth Error: No DB token found.");
+      return;
+    }
+    try {
+      const res = await fetch(`${authUrl.BASE_URL}/dataset/delete/${ds.id}`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!res.ok) throw new Error("Delete failed");
+      setDatasets((prev) => prev.filter((d) => d.id !== ds.id));
+      if (selectedId === ds.id) {
+        setSelectedId(null);
+        setCharts([]);
+        setKpis([]);
+      }
+      Swal.fire("Deleted!", "Your dataset has been removed.", "success");
+    } catch (err) {
+      console.error(err);
+      Swal.fire("Error", "Unable to delete dataset.", "error");
+    }
+  };
+
+   const handleSuggestionClick = (suggestion) => {
+    const inputElement = document.getElementById("aiInput");
+    inputElement.value = suggestion;
+    handleSendMessage();
+  };
+
+    const checkState = (input) => {
+    console.log("chatinput", chatInput);
+    console.log(`input`, input);
+  };
+const selectDataset = async (id) => {
+    setSelectedId(id);
+    setActivePanel(null);
+    setCharts([]);
+    setKpis([]);
+    setLoadingDetails(true);
+   const ds = datasets.find((d) => String(d.id) === String(id));
+const datasetName = ds?.dataset_name || ds?.name || "";
+setSelectedName(datasetName);
+selectedNameRef.current = datasetName; // Add this line
+
+    const token = localStorage.getItem("accessToken");
+    if (!token) {
+      toast.error("Auth Error: No access token found.");
+      return;
+    }
+    const dbToken = localStorage.getItem("db_token");
+    if (!dbToken) {
+      toast.error("Auth Error: No DB token found.");
+      return;
+    }
+
+    try {
+      // 1) Fetch KPIs and Charts data
+      const [kpisRes, chartsRes] = await Promise.all([
+        fetch(`${authUrl.BASE_URL}/dataset/kpis/${id}/`, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+        fetch(`${authUrl.BASE_URL}/dataset/chart/${id}/`, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+      ]);
+
+      if (!kpisRes.ok || !chartsRes.ok) {
+        throw new Error(`Failed to load data for dataset ${id}`);
+      }
+
+      const kpisData = await kpisRes.json();
+      const chartsData = await chartsRes.json();
+
+      console.log("Raw KPIs data:", kpisData); // Debug log
+      console.log("Raw Charts data:", chartsData); // Debug log
+
+      // Extract KPI metadata from the new schema
+      const kpiList = kpisData?.data?.kpi || [];
+
+      // Now fetch the actual KPI values using individual API calls
+      const kpiValuePromises = kpiList.map(async (kpi) => {
+        try {
+          const response = await fetch(
+            `${authUrl.BASE_URL}/dataset/kpi/${kpi.id}/data/`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ db_token: dbToken }),
+            }
+          );
+
+          if (response.ok) {
+            const result = await response.json();
+            console.log(`KPI ${kpi.id} result:`, result); // Debug log
+
+            return {
+              kpi_id: kpi.id,
+              kpi_name: result?.data?.kpi_name || kpi.kpi_name,
+              value: result?.data?.value || result?.data?.raw_value || "N/A",
+            };
+          } else {
+            console.error(
+              `Failed to fetch KPI ${kpi.id} data:`,
+              response.status
+            );
+          }
+        } catch (err) {
+          console.error(`Error fetching KPI ${kpi.id}:`, err);
+        }
+
+        // Fallback if API call fails
+        return {
+          kpi_id: kpi.id,
+          kpi_name: kpi.kpi_name,
+          value: "Error",
+        };
+      });
+
+      // Wait for all KPI value requests to complete
+      const kpiResults = await Promise.allSettled(kpiValuePromises);
+
+      // Extract successful KPI results
+      const transformedKpis = kpiResults
+        .filter((r) => r.status === "fulfilled" && r.value)
+        .map((r) => r.value);
+
+      // Extract chart metadata from the new schema
+      const chartList = chartsData?.data?.chart || [];
+
+      // Now fetch the actual chart data using individual API calls
+      const chartValuePromises = chartList.map(async (chart) => {
+        try {
+          const response = await fetch(
+            `${authUrl.BASE_URL}/dataset/chart/${chart.id}/data/`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ db_token: dbToken }),
+            }
+          );
+
+          if (response.ok) {
+            const result = await response.json();
+            console.log(`Chart ${chart.id} result:`, result); // Debug log
+
+            // Transform the response to match the expected format
+            return {
+              chart_id: result?.data?.chart_id || chart.id,
+              chart_title: result?.data?.chart_title || chart.chart_title,
+              chart_type: result?.data?.chart_type || chart.chart_type,
+              x_axis: result?.data?.x_axis || chart.x_axis,
+              y_axis: result?.data?.y_axis || chart.y_axis,
+              data: result?.data?.data || null, // This contains labels and datasets
+            };
+          } else {
+            console.error(
+              `Failed to fetch chart ${chart.id} data:`,
+              response.status
+            );
+          }
+        } catch (err) {
+          console.error(`Error fetching chart ${chart.id}:`, err);
+        }
+        return null;
+      });
+
+      // Wait for all chart data requests to complete
+      const chartResults = await Promise.allSettled(chartValuePromises);
+
+      // Extract successful chart results and filter out heatmaps
+      const finalCharts = chartResults
+        .filter(
+          (r) =>
+            r.status === "fulfilled" &&
+            r.value &&
+            r.value.chart_type !== "heatmap"
+        )
+        .map((r) => r.value);
+
+      // Update state
+      setKpis(transformedKpis);
+      setCharts(finalCharts);
+
+      console.log("Final KPIs:", transformedKpis); // Debug log
+      console.log("Final Charts:", finalCharts); // Debug log
+    } catch (err) {
+      console.error("Error in selectDataset:", err);
+      Swal.fire("Error", "Could not load dataset details", "error");
+    } finally {
+      setLoadingDetails(false);
+    }
+  };
+
+    const handleKeyPress = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
+    }
+  };
   function checkCondition({ cell, type, operator, value, value2, ranges }) {
     // Numeric branch
     if (type === 'number' || (type === 'other' && NUM_OPS.includes(operator))) {
@@ -1559,6 +2157,23 @@ export default function ViewDashboard() {
             {isEditingLayout ? 'Editing…' : 'Edit Layout'}
           </span>
         </div>
+{/* chatbot icon */}
+ <div className="flex flex-col items-center">
+  <button
+    onClick={() => {
+      setActivePanel((prev) =>
+        prev === "chatbot" ? null : "chatbot"
+      );
+    }}
+    className={`p-2 rounded hover:bg-gray-200 ${
+      activePanel === "chatbot" ? "bg-gray-200" : ""
+    }`}
+    title="AI Chatbot"
+  >
+    <FiMessageSquare size={20} className="text-gray-600" />
+  </button>
+  <span className="text-[10px]">AI Chat</span>
+</div>
 
         {/* Delete dashboard */}
         <div className="flex flex-col items-center">
@@ -1589,7 +2204,231 @@ export default function ViewDashboard() {
           </div>
         )}
       </aside>
+  {activePanel && (
+          <div
+            className="fixed w-[320px] left-[70px] h-[500px] z-30 top-[60px] rounded-lg overflow-hidden drop-shadow-xl flex bg-black bg-opacity-25"
+            onClick={() => setActivePanel(null)}
+          >
+            <div
+              className="bg-white border border-gray-200 text-gray-600 w-full max-h-[500px] overflow-y-auto scrollsettings rounded-lg"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between p-4 border-b border-gray-200">
+                <p className="text-lg font-medium text-gray-800">
+                  {activePanel === "dataset" && "Datasets"}
+                  {activePanel === "chatbot" && (
+                    <>
+                      {" "}
+                      <div className="flex items-center space-x-2">
+                        <div className="w-6 h-6 bg-gray-200 rounded-full flex items-center justify-center">
+                          <FiMessageSquare className="text-gray-600 text-xs" />
+                        </div>
+                        <span className="text-md font-medium text-gray-600">
+                          AI Assistant
+                        </span>
+                      </div>
+                    </>
+                  )}
+                </p>
+                <button
+                  onClick={() => setActivePanel(null)}
+                  className="p-1 rounded hover:bg-gray-200"
+                  title="Close"
+                >
+                  <FiX size={20} />
+                </button>
+              </div>
+              {/* Content list */}
+              <div className="p-2">
+                {activePanel === "dataset" && (
+                  <div className="space-y-2">
+                    {loadingDatasets ? (
+                      <div className="space-y-2">
+                        {Array.from({ length: 10 }).map((_, i) => (
+                          <div
+                            key={i}
+                            className="h-5 bg-gray-200 rounded animate-pulse"
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      datasets.map((ds) => (
+                        <div
+                          key={ds.id}
+                          onClick={() => changeDataset(ds.id)}
+                          className={`px-2 py-2 cursor-pointer flex justify-between items-center rounded hover:bg-gray-100 ${
+                            selectedId === ds.id
+                              ? "bg-gray-100 text-gray-800"
+                              : "text-gray-800"
+                          }`}
+                        >
+                          <span className="truncate">{ds.name}</span>
+                          <button
+                            onClick={(e) => handleDeleteDataset(ds, e)}
+                            className="p-1 hover:text-red-500"
+                            title={`Delete ${ds.name}`}
+                          >
+                            <FiTrash2 size={16} />
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+                {activePanel === "chatbot" && (
+                  <div className="flex flex-col h-full">
+                    {/* Welcome Message and Suggestions */}
+                    {showSuggestions && chatMessages.length === 0 && (
+                      <div className="p-4 space-y-4">
+                        {/* Welcome Section */}
+                        <div className="space-y-3">
+                          <div className="space-y-3 text-sm text-gray-600 leading-relaxed">
+                            <p>
+                              Ask me anything about your data, charts, or KPIs
+                              to get started!
+                            </p>
+                          </div>
+                        </div>
 
+                        {/* Suggestion Buttons */}
+                        <div className="space-y-2">
+                          <button
+                            onClick={() =>
+                              handleSuggestionClick(
+                                "Can you explain me the charts in my dataset?"
+                              )
+                            }
+                            className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors"
+                          >
+                            <span className="text-sm text-gray-700">
+                              Can you explain me the charts in my dataset?
+                            </span>
+                          </button>
+
+                          <button
+                            onClick={() =>
+                              handleSuggestionClick(
+                                "Please generate a chart for me."
+                              )
+                            }
+                            className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors"
+                          >
+                            <span className="text-sm text-gray-700">
+                              Please generate a chart for me.
+                            </span>
+                          </button>
+
+                          <button
+                            onClick={() =>
+                              handleSuggestionClick(
+                                "How do I add more data to my dataset?"
+                              )
+                            }
+                            className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors"
+                          >
+                            <span className="text-sm text-gray-700">
+                              How do I add more data to my dataset?
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Chat Messages */}
+                    {chatMessages.length > 0 && (
+                      <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-[200px] max-h-[300px]">
+                        {chatMessages.map((message) => (
+                          <div
+                            key={message.id}
+                            className={`flex ${
+                              message.isUser
+                                ? "justify-end"
+                                : "items-start space-x-2"
+                            }`}
+                          >
+                            {!message.isUser && (
+                              <div className="w-6 h-6 bg-gray-200 rounded-full flex items-center justify-center flex-shrink-0 mt-1">
+                                <FiMessageSquare className="text-gray-600 text-xs" />
+                              </div>
+                            )}
+                            <div
+                              className={`rounded-xl p-3 max-w-[85%] text-sm ${
+                                message.isUser
+                                  ? "bg-gray-700 text-white"
+                                  : "bg-gray-50 text-gray-700 border border-gray-200"
+                              }`}
+                            >
+                              {message.isUser ? (
+                                <p className="leading-relaxed">
+                                  {message.text}
+                                </p>
+                              ) : (
+                                renderAIMessage(message)
+                              )}
+                            </div>
+                          </div>
+                        ))}
+
+                        {/* Typing Indicator */}
+                        {isTyping && (
+                          <div className="flex items-start space-x-2">
+                            <div className="w-6 h-6 bg-gray-200 rounded-full flex items-center justify-center flex-shrink-0 mt-1">
+                              <FiMessageSquare className="text-gray-600 text-xs" />
+                            </div>
+                            <div className="bg-gray-50 rounded-xl border border-gray-200 p-3">
+                              <div className="flex items-center space-x-2">
+                                <div className="flex space-x-1">
+                                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"></div>
+                                  <div
+                                    className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"
+                                    style={{ animationDelay: "0.2s" }}
+                                  ></div>
+                                  <div
+                                    className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"
+                                    style={{ animationDelay: "0.4s" }}
+                                  ></div>
+                                </div>
+                                <span className="text-xs text-gray-500">
+                                  AI is thinking...
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Scroll anchor */}
+                        <div ref={chatMessagesEndRef} />
+                      </div>
+                    )}
+
+                    {/* Chat Input */}
+                    <div className="p-4 border-t border-gray-200 bg-white">
+                      <div className="flex space-x-2">
+                        <input
+                          type="text"
+                          id="aiInput"
+                          // value={chatInput}
+                          onKeyPress={handleKeyPress}
+                          onChange={(e) => checkState(e.target.value)}
+                          placeholder="Ask a question or request..."
+                          className="flex-1 px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm bg-gray-50"
+                        />
+
+                        <button
+                          onClick={handleSendMessage}
+                          className="px-4 py-3 bg-gray-700 text-white rounded-xl hover:bg-gray-800 transition-colors focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <FiSend className="text-sm" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       {/* Filters panel */}
       {filterPanelOpen && (
         <div

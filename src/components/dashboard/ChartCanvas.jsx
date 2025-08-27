@@ -1,6 +1,4 @@
 // src/components/dashboard/ChartCanvas.jsx
-import React from "react";
-import { motion } from "framer-motion";
 import { Plus, BarChart3, TrendingUp, Users, Activity } from "lucide-react";
 import CreateConnection from "./CreateConnection";
 import ManageConnections from "./ManageConnections";
@@ -43,7 +41,7 @@ export default function ChartCanvas() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+          <h1 className="text-2xl font-bold text-gray-900" id="connections-list">Dashboard</h1>
           <p className="text-gray-600">
             Build and customize your data visualizations
           </p>
@@ -67,7 +65,7 @@ export default function ChartCanvas() {
 
       <ManageConnections />
       
-      <CreateConnection />
+      {/* <CreateConnection /> */}
 
       {/* Charts Grid */}
       {/* <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6 mb-6">

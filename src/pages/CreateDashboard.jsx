@@ -863,11 +863,11 @@ const token = localStorage.getItem("accessToken");
       console.log("Saving payload:", payload);
 
       const resp = await fetch(`${authUrl.BASE_URL}/dashboard/layout/`, {
-        method: "POST",
+        method: "GET",
         headers: { "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
          },
-        body: JSON.stringify(payload),
+        // body: JSON.stringify(payload),
       });
       console.log(resp);
       if (!resp.ok) throw new Error(`Status ${resp.status}`);

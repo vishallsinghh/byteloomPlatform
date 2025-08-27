@@ -38,7 +38,7 @@ const databases = [
   },
 ];
 
-export default function CreateConnection() {
+export default function CreateConnection({setResult}) {
   const navigate = useNavigate();
 
   const [step, setStep] = useState(1);
@@ -117,12 +117,12 @@ export default function CreateConnection() {
       if (res.status === 200) {
         // parse the JSON so we can grab the token
         const result = await res.json();
-        // store the permanent db_token
-        localStorage.setItem("db_token", result.data.db_token);
-        console.log("Stored db_token:", result.data.db_token);
-        // keep your existing debug log
-        toast.success("Test Successful: Connection parameters are valid.");
+    
+        setResult(result);
+        toast.success("Connection parameters are valid! Select schema and create connection.");
         setStatus("success");
+         // Scroll to top of the screen on success
+ scrollToElement();
       } else {
         const errData = await res.json();
         setError(errData.message || "Test failed");
@@ -137,56 +137,15 @@ export default function CreateConnection() {
     }
   };
 
-  const handleCreate = async () => {
-    if (status !== "success") {
-      setError("Please test the connection successfully before proceeding.");
-      toast.warn("Action Required: Test connection before creating.");
-      return;
-    }
 
-    const token = localStorage.getItem("accessToken");
-    if (!token) {
-      toast.error("Auth Error: No access token found.");
-      setTimeout(() => navigate("/login"), 2000);
-      return;
-    }
-
-    const payload = {
-      host: formData.host,
-      port: Number(formData.port),
-      username: formData.username,
-      password: formData.password,
-      database: formData.database,
-    };
-
-    try {
-      const res = await fetch(`${authUrl.BASE_URL}/db_connector/get-db-token/`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
-      });
-      if (res.status === 200) {
-            // parse the JSON so we can grab the token
-        const result = await res.json();
-        // store the permanent db_token
-        localStorage.setItem("db_token", result.data.db_token);
-        toast.success("Connection Created! Redirecting…");
-        setTimeout(() => navigate("/create-dataset"), 2000);
-      } else {
-        const errData = await res.json();
-        toast.error(
-          `Creation Failed: ${errData.message || "Please try again."}`
-        );
-      }
-    } catch (err) {
-      console.error(err);
-      toast.error("Network Error: Failed to reach the server.");
-    }
-  };
-
+function scrollToElement(){
+  
+                const el = document.getElementById(
+                  "connections-list"
+                );
+                if (el) el.scrollIntoView({ behavior: "smooth" });
+              
+}
   return (
     <div className="bg-gray-50 py-12">
       <ToastContainer position="top-right" autoClose={5000} hideProgressBar />
@@ -361,23 +320,11 @@ export default function CreateConnection() {
                   {status === "testing" ? "Testing…" : "Test Connection"}
                 </button>
               </div>
-
-              {status === "success" && (
-                <div className="mt-4 flex justify-end">
-                  <button
-                    type="button"
-                    onClick={handleCreate}
-                    className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 transition"
-                  >
-                    Create Connection
-                  </button>
-                </div>
-              )}
-
               {status === "error" && (
                 <div className="mt-4 text-red-600">{error}</div>
               )}
             </form>
+
           </div>
         )}
       </main>

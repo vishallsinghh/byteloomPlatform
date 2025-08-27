@@ -1,11 +1,4 @@
-import React, {
-  useState,
-  useEffect,
-  useMemo,
-  useCallback,
-  lazy,
-  Suspense,
-} from "react";
+import React, { useState, useEffect, useMemo, lazy, useRef } from "react";
 import Swal from "sweetalert2";
 import {
   FiTrash2,
@@ -14,9 +7,13 @@ import {
   FiX,
   FiMessageSquare,
   FiSend,
+  FiTrendingUp, // ADD THIS
+  FiBarChart, // ADD THIS
+  FiPieChart, // ADD THIS
+  FiCode, // ADD THIS
 } from "react-icons/fi";
 import { MdOutlineAddchart } from "react-icons/md";
-import { RiRobot2Line } from 'react-icons/ri'
+import { RiRobot2Line } from "react-icons/ri";
 import colorLib from "@kurkle/color";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Navbar from "../components/Navbar";
@@ -29,7 +26,7 @@ const HighchartsReact = lazy(() => import("highcharts-react-official"));
 
 function GalleryPage() {
   const navigate = useNavigate();
-
+  const chatMessagesEndRef = useRef(null);
   // Active dataset ID
   const [selectedId, setSelectedId] = useState(null);
   // Data fetched from API
@@ -57,11 +54,13 @@ function GalleryPage() {
 
   const [searchParams /*, setSearchParams*/] = useSearchParams();
 
-  const [explainModalOpen, setExplainModalOpen] = useState(false)
-const [explainModalChart, setExplainModalChart] = useState(null)
-const [explainLoading, setExplainLoading] = useState(false)
-const [explainResponse, setExplainResponse] = useState(null)
-const [explainError, setExplainError] = useState(null)
+  const [explainModalOpen, setExplainModalOpen] = useState(false);
+  const [explainModalChart, setExplainModalChart] = useState(null);
+  const [explainLoading, setExplainLoading] = useState(false);
+  const [explainResponse, setExplainResponse] = useState(null);
+  const [explainError, setExplainError] = useState(null);
+
+  const selectedNameRef = useRef("dataaaaa");
   // Define color palettes
   const LINE_COLORS = ["rgb(207,37,0)", "rgb(7,164,199)"];
 
@@ -127,12 +126,12 @@ const [explainError, setExplainError] = useState(null)
       return;
     }
     fetch(`${authUrl.BASE_URL}/dataset/info/`, {
-      method: "POST",
+      method: "GET",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ db_token: dbToken }),
+      // body: JSON.stringify({ db_token: dbToken }),
     })
       .then((res) => {
         if (!res.ok) throw new Error(`Network error: ${res.status}`);
@@ -151,7 +150,14 @@ const [explainError, setExplainError] = useState(null)
     navigate(`/gallery?datasetId=${id}`);
     selectDataset(id);
   };
+  // Auto-scroll to bottom of chat messages
+  const scrollToBottom = () => {
+    chatMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
 
+  useEffect(() => {
+    scrollToBottom();
+  }, [chatMessages, isTyping]);
   // Simplified selectDataset function - test version
   const selectDataset = async (id) => {
     setSelectedId(id);
@@ -159,8 +165,10 @@ const [explainError, setExplainError] = useState(null)
     setCharts([]);
     setKpis([]);
     setLoadingDetails(true);
-    const ds = datasets.find((d) => d.id === id);
-    setSelectedName(ds ? ds.name : "");
+   const ds = datasets.find((d) => String(d.id) === String(id));
+const datasetName = ds?.dataset_name || ds?.name || "";
+setSelectedName(datasetName);
+selectedNameRef.current = datasetName; // Add this line
 
     const token = localStorage.getItem("accessToken");
     if (!token) {
@@ -324,67 +332,385 @@ const [explainError, setExplainError] = useState(null)
       setLoadingDetails(false);
     }
   };
-  const handleSendMessage = async()=>{
-     const inputElement = document.getElementById("aiInput").value;
-      console.log(inputElement);
-      const textToSend = inputElement;
-      if (!textToSend) return;
+  // Enhanced AI Message Component
+  const renderAIMessage = (message) => {
+    const { intent, data } = message.aiResponse || {};
 
-      const userMessage = {
-        id: Date.now().toString(),
-        text: textToSend,
-        isUser: true,
-        timestamp: new Date(),
-      };
+    switch (intent) {
+      case "greeting":
+        return (
+          <div className="space-y-2">
+            <div className="flex items-center space-x-2">
+              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+              <span className="text-sm font-medium text-gray-700">
+                Greeting
+              </span>
+            </div>
+            <p className="text-sm text-gray-700">{data?.response}</p>
+          </div>
+        );
 
-      setChatMessages((prev) => [...prev, userMessage]);
-      setChatInput("");
-      setShowSuggestions(false);
-      setIsTyping(true);
+      case "analyze_chart":
+        return (
+          <div className="space-y-3">
+            <div className="flex items-center space-x-2">
+              <FiPieChart className="text-blue-500" size={16} />
+              <span className="text-sm font-medium text-gray-700">
+                Chart Analysis
+              </span>
+            </div>
 
+            <div className="bg-blue-50 rounded-lg p-3 space-y-2">
+              <p className="text-sm text-gray-700">{data?.response}</p>
+
+              {data?.data_insights && (
+                <div className="space-y-2">
+                  <div className="text-xs font-medium text-gray-600">
+                    Key Insights:
+                  </div>
+                  <div className="text-xs text-gray-600">
+                    Total: {data.data_insights.total}
+                  </div>
+                  {data.data_insights.top_labels
+                    ?.slice(0, 3)
+                    .map((item, idx) => (
+                      <div
+                        key={idx}
+                        className="flex justify-between text-xs text-gray-600"
+                      >
+                        <span>{item.label}:</span>
+                        <span>
+                          {item.value} ({(item.percent * 100).toFixed(1)}%)
+                        </span>
+                      </div>
+                    ))}
+                </div>
+              )}
+
+              {data?.inference && (
+                <div className="text-xs text-blue-700 italic border-l-2 border-blue-300 pl-2">
+                  {data.inference}
+                </div>
+              )}
+            </div>
+
+            {data?.suggestions && data.suggestions.length > 0 && (
+              <div className="space-y-1">
+                <div className="text-xs font-medium text-gray-600">
+                  Suggestions:
+                </div>
+                {data.suggestions.map((suggestion, idx) => (
+                  <div
+                    key={idx}
+                    className="text-xs text-gray-600 flex items-start space-x-1"
+                  >
+                    <span className="text-green-500 mt-0.5">•</span>
+                    <span>{suggestion}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+
+      case "analyze_kpi":
+        return (
+          <div className="space-y-3">
+            <div className="flex items-center space-x-2">
+              <FiTrendingUp className="text-green-500" size={16} />
+              <span className="text-sm font-medium text-gray-700">
+                KPI Analysis
+              </span>
+            </div>
+
+            <div className="bg-green-50 rounded-lg p-3 space-y-2">
+              <p className="text-sm text-gray-700">{data?.response}</p>
+
+              {data?.sql_suggestion && (
+                <div className="bg-gray-100 rounded p-2 text-xs font-mono text-gray-600">
+                  {data.sql_suggestion}
+                </div>
+              )}
+            </div>
+
+            {data?.suggestions && data.suggestions.length > 0 && (
+              <div className="space-y-1">
+                <div className="text-xs font-medium text-gray-600">
+                  Recommendations:
+                </div>
+                {data.suggestions.map((suggestion, idx) => (
+                  <div
+                    key={idx}
+                    className="text-xs text-gray-600 flex items-start space-x-1"
+                  >
+                    <span className="text-green-500 mt-0.5">•</span>
+                    <span>{suggestion}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+
+      case "create_kpi":
+        return (
+          <div className="space-y-3">
+            <div className="flex items-center space-x-2">
+              <FiTrendingUp className="text-purple-500" size={16} />
+              <span className="text-sm font-medium text-gray-700">
+                KPI Creation
+              </span>
+            </div>
+
+            <div className="bg-purple-50 rounded-lg p-3 space-y-2">
+              <div className="text-sm font-medium text-gray-800">
+                {data?.kpi_name}
+              </div>
+              <p className="text-sm text-gray-700">{data?.expression}</p>
+
+              {data?.sql_query && (
+                <div className="bg-gray-100 rounded p-2 text-xs font-mono text-gray-600">
+                  {data.sql_query}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-2">
+              <div className="text-xs text-yellow-800">
+                🚀 We're adding automatic KPI creation to your dashboard soon!
+              </div>
+            </div>
+          </div>
+        );
+
+      case "create_chart":
+        return (
+          <div className="space-y-3">
+            <div className="flex items-center space-x-2">
+              <FiBarChart className="text-indigo-500" size={16} />
+              <span className="text-sm font-medium text-gray-700">
+                Chart Creation
+              </span>
+            </div>
+
+            <div className="bg-indigo-50 rounded-lg p-3 space-y-2">
+              <div className="flex items-center space-x-2">
+                <span className="text-xs bg-indigo-200 text-indigo-800 px-2 py-1 rounded">
+                  {data?.chart_type?.toUpperCase()}
+                </span>
+              </div>
+
+              <div className="text-sm text-gray-700">
+                <div>
+                  <strong>X-Axis:</strong> {data?.x_axis}
+                </div>
+                <div>
+                  <strong>Y-Axis:</strong> {data?.y_axis}
+                </div>
+              </div>
+
+              <p className="text-sm text-gray-600 italic">
+                {data?.explanation}
+              </p>
+
+              {data?.sql_query && (
+                <div className="bg-gray-100 rounded p-2 text-xs font-mono text-gray-600">
+                  {data.sql_query}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-2">
+              <div className="text-xs text-yellow-800">
+                🚀 Automatic chart creation feature coming soon to your
+                dashboard!
+              </div>
+            </div>
+          </div>
+        );
+
+      case "other":
+        return (
+          <div className="space-y-2">
+            <div className="flex items-center space-x-2">
+              <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
+              <span className="text-sm font-medium text-gray-700">
+                General Query
+              </span>
+            </div>
+            <p className="text-sm text-gray-700">{data?.response}</p>
+            <div className="text-xs text-gray-500 italic">
+              For data-related questions, try asking about your charts or KPIs!
+            </div>
+          </div>
+        );
+
+      default:
+        return <p className="text-sm text-gray-700">{message.text}</p>;
+    }
+  };
+const handleSendMessage = async () => {
+  const inputElement = document.getElementById("aiInput");
+  const textToSend = inputElement.value.trim();
+  if (!textToSend) return;
+
+  const userMessage = {
+    id: Date.now().toString(),
+    text: textToSend,
+    isUser: true,
+    timestamp: new Date(),
+  };
+
+  setChatMessages((prev) => [...prev, userMessage]);
+  inputElement.value = ""; // Clear input
+  setShowSuggestions(false);
+  setIsTyping(true);
+
+  try {
+    const token = localStorage.getItem("accessToken");
+    if (!token) {
+      toast.error("Auth Error: No access token found.");
+      return;
+    }
+
+    const dbToken = localStorage.getItem("db_token");
+    if (!dbToken) {
+      toast.error("Auth Error: No DB token found.");
+      return;
+    }
+
+    // Security layer: Ensure we have dataset info before sending
+    let currentDatasetName = selectedNameRef.current;
+    
+    // If datasets array is empty or selectedName is empty, fetch dataset info first
+    if (datasets.length === 0 || !currentDatasetName) {
+      console.log("Datasets not loaded, fetching dataset info...");
+      
       try {
-        const payload = {
-          dataset_name: "dataaaaa",
-          dataset_id: selectedId,
-          message: textToSend,
-        };
-
-        const response = await fetch("https://demo.techfinna.com/ai/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+        const datasetInfoResponse = await fetch(`${authUrl.BASE_URL}/dataset/info/`, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
         });
 
-        const result = await response.json();
-        setIsTyping(false);
+        if (!datasetInfoResponse.ok) {
+          throw new Error(`Dataset info fetch failed: ${datasetInfoResponse.status}`);
+        }
 
-        const aiMessage = {
-          id: (Date.now() + 1).toString(),
-          text: result?.reply || "No response from AI.",
-          isUser: false,
-          timestamp: new Date(),
-        };
-
-        setChatMessages((prev) => [...prev, aiMessage]);
-      } catch (err) {
-        console.error("AI Chat error:", err);
+        const datasetInfoJson = await datasetInfoResponse.json();
+        const fetchedDatasets = Array.isArray(datasetInfoJson.data) ? datasetInfoJson.data : [];
+        
+        // Update datasets state
+        setDatasets(fetchedDatasets);
+        
+        // Find the current dataset name from fetched data
+        const currentDataset = fetchedDatasets.find((d) => String(d.id) === String(selectedId));
+        currentDatasetName = currentDataset?.dataset_name || currentDataset?.name || "";
+        
+        // Update both state and ref
+        setSelectedName(currentDatasetName);
+        selectedNameRef.current = currentDatasetName;
+        
+        console.log("Dataset info fetched, dataset name:", currentDatasetName);
+        
+      } catch (fetchError) {
+        console.error("Failed to fetch dataset info:", fetchError);
         setIsTyping(false);
         setChatMessages((prev) => [
           ...prev,
           {
             id: (Date.now() + 1).toString(),
-            text: "⚠️ Error contacting AI service.",
+            text: "⚠️ Error loading dataset information. Please try again.",
             isUser: false,
             timestamp: new Date(),
           },
         ]);
+        return;
       }
-  }
+    }
 
-  const checkState = (input) =>{
+    // Final validation
+    if (!currentDatasetName) {
+      console.error("Dataset name still not available after fetch attempt");
+      setIsTyping(false);
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          text: "⚠️ Unable to identify dataset. Please select a dataset and try again.",
+          isUser: false,
+          timestamp: new Date(),
+        },
+      ]);
+      return;
+    }
+
+    const payload = {
+      db_token: dbToken,
+      dataset_name: currentDatasetName,
+      dataset_id: selectedId,
+      message: textToSend,
+    };
+    
+    console.log("AI Chat payload:", payload);
+
+    const response = await fetch(
+      "https://backend.techfinna.com/chat_with_ai/chat/",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+
+    const result = await response.json();
+    setIsTyping(false);
+
+    const aiMessage = {
+      id: (Date.now() + 1).toString(),
+      text: result?.data?.response || result?.reply || "No response from AI.",
+      isUser: false,
+      timestamp: new Date(),
+      aiResponse: result,
+    };
+
+    setChatMessages((prev) => [...prev, aiMessage]);
+  } catch (err) {
+    console.error("AI Chat error:", err);
+    setIsTyping(false);
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        id: (Date.now() + 1).toString(),
+        text: "⚠️ Error contacting AI service.",
+        isUser: false,
+        timestamp: new Date(),
+      },
+    ]);
+  }
+};
+
+  const handleKeyPress = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
+    }
+  };
+
+  const handleSuggestionClick = (suggestion) => {
+    const inputElement = document.getElementById("aiInput");
+    inputElement.value = suggestion;
+    handleSendMessage();
+  };
+  const checkState = (input) => {
     console.log("chatinput", chatInput);
     console.log(`input`, input);
-  }
+  };
 
   // Delete a chart by id
   const handleDelete = (chartId) => {
@@ -475,56 +801,61 @@ const [explainError, setExplainError] = useState(null)
     // either:
     navigate(`/edit?${params}`);
   };
-const handleExplainChart = async (chartObj) => { 
-  setExplainModalChart(chartObj); 
-  setExplainModalOpen(true);
-  setExplainLoading(true);
-  setExplainResponse(null);
-  setExplainError(null);
-  
-  try {
-    const payload = {
-      title: chartObj?.chart_title || "Untitled Chart",
-      chart_type: chartObj?.chart_type || "unknown",
-      x_axis: chartObj?.x_axis || "",
-      y_axis: chartObj?.y_axis || "",
-      dataset_name: selectedName || `Dataset ${selectedId}`,
-      table_name: "dashboard_data",
-      data: chartObj?.data?.datasets?.[0]?.data || [],
-      labels: chartObj?.data?.labels || []
-    };
-    
-    console.log('Sending payload to AI API:', payload);
-    const token = localStorage.getItem("accessToken");
-    if (!token) {
-      throw new Error("Auth Error: No access token found.");
+  const handleExplainChart = async (chartObj) => {
+    setExplainModalChart(chartObj);
+    setExplainModalOpen(true);
+    setExplainLoading(true);
+    setExplainResponse(null);
+    setExplainError(null);
+
+    try {
+      const payload = {
+        title: chartObj?.chart_title || "Untitled Chart",
+        chart_type: chartObj?.chart_type || "unknown",
+        x_axis: chartObj?.x_axis || "",
+        y_axis: chartObj?.y_axis || "",
+        dataset_name: selectedName || `Dataset ${selectedId}`,
+        table_name: "dashboard_data",
+        data: chartObj?.data?.datasets?.[0]?.data || [],
+        labels: chartObj?.data?.labels || [],
+      };
+
+      console.log("Sending payload to AI API:", payload);
+      const token = localStorage.getItem("accessToken");
+      if (!token) {
+        throw new Error("Auth Error: No access token found.");
+      }
+      const response = await fetch(
+        "https://backend.techfinna.com/explain_with_ai/explain_chart/",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`API request failed with status ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log("AI API Response:", result);
+
+      if (result.success) {
+        setExplainResponse(result.data);
+      } else {
+        throw new Error(result.errors || "API returned an error");
+      }
+    } catch (error) {
+      console.error("Error calling AI API:", error);
+      setExplainError(error.message || "Failed to get AI explanation");
+    } finally {
+      setExplainLoading(false);
     }
-    const response = await fetch('https://backend.techfinna.com/explain_with_ai/explain_chart/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify(payload)
-    });
-    
-    if (!response.ok) {
-      throw new Error(`API request failed with status ${response.status}`);
-    }
-    
-    const result = await response.json();
-    console.log('AI API Response:', result);
-    
-    if (result.success) {
-      setExplainResponse(result.data);
-    } else {
-      throw new Error(result.errors || 'API returned an error');
-    }
-    
-  } catch (error) {
-    console.error('Error calling AI API:', error);
-    setExplainError(error.message || 'Failed to get AI explanation');
-  } finally {
-    setExplainLoading(false);
-  }
-}
+  };
   // Compute a type-specific offset array
   const typeOffsets = useMemo(() => {
     const counts = {};
@@ -941,7 +1272,6 @@ const handleExplainChart = async (chartObj) => {
 
     return baseOptions;
   };
-  console.log("123 ", datasets);
 
   return (
     <>
@@ -1101,19 +1431,40 @@ const handleExplainChart = async (chartObj) => {
 
                         {/* Suggestion Buttons */}
                         <div className="space-y-2">
-                          <button className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors">
+                          <button
+                            onClick={() =>
+                              handleSuggestionClick(
+                                "Can you recommend some interesting insights?"
+                              )
+                            }
+                            className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors"
+                          >
                             <span className="text-sm text-gray-700">
                               Can you recommend some interesting insights?
                             </span>
                           </button>
 
-                          <button className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors">
+                          <button
+                            onClick={() =>
+                              handleSuggestionClick(
+                                "Please generate a chart for me."
+                              )
+                            }
+                            className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors"
+                          >
                             <span className="text-sm text-gray-700">
                               Please generate a chart for me.
                             </span>
                           </button>
 
-                          <button className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors">
+                          <button
+                            onClick={() =>
+                              handleSuggestionClick(
+                                "How do I add more data to my dataset?"
+                              )
+                            }
+                            className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors"
+                          >
                             <span className="text-sm text-gray-700">
                               How do I add more data to my dataset?
                             </span>
@@ -1146,7 +1497,13 @@ const handleExplainChart = async (chartObj) => {
                                   : "bg-gray-50 text-gray-700 border border-gray-200"
                               }`}
                             >
-                              <p className="leading-relaxed">{message.text}</p>
+                              {message.isUser ? (
+                                <p className="leading-relaxed">
+                                  {message.text}
+                                </p>
+                              ) : (
+                                renderAIMessage(message)
+                              )}
                             </div>
                           </div>
                         ))}
@@ -1177,6 +1534,9 @@ const handleExplainChart = async (chartObj) => {
                             </div>
                           </div>
                         )}
+
+                        {/* Scroll anchor */}
+                        <div ref={chatMessagesEndRef} />
                       </div>
                     )}
 
@@ -1187,6 +1547,7 @@ const handleExplainChart = async (chartObj) => {
                           type="text"
                           id="aiInput"
                           // value={chatInput}
+                          onKeyPress={handleKeyPress}
                           onChange={(e) => checkState(e.target.value)}
                           placeholder="Ask a question or request..."
                           className="flex-1 px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm bg-gray-50"
@@ -1194,7 +1555,6 @@ const handleExplainChart = async (chartObj) => {
 
                         <button
                           onClick={handleSendMessage}
-                          
                           className="px-4 py-3 bg-gray-700 text-white rounded-xl hover:bg-gray-800 transition-colors focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           <FiSend className="text-sm" />
@@ -1289,28 +1649,28 @@ const handleExplainChart = async (chartObj) => {
                           </h3>
                         </div>
 
-                       {/* Edit/Delete/Explain icons overlay */}
-<div className="absolute top-2 right-2 flex items-center gap-2 z-10">
-  <button
-    onClick={() => handleExplainChart(chart)}
-    className="p-1 hover:text-blue-600"
-    title="Explain with AI"
-  >
-    <RiRobot2Line size={18} />
-  </button>
-  <button
-    onClick={() => handleEdit(chart)}
-    className="p-1 hover:text-blue-600"
-  >
-    <FiEdit size={18} />
-  </button>
-  <button
-    onClick={() => handleDelete(chart.chart_id)}
-    className="p-1 hover:text-red-600"
-  >
-    <FiTrash2 size={18} />
-  </button>
-</div>
+                        {/* Edit/Delete/Explain icons overlay */}
+                        <div className="absolute top-2 right-2 flex items-center gap-2 z-10">
+                          <button
+                            onClick={() => handleExplainChart(chart)}
+                            className="p-1 hover:text-blue-600"
+                            title="Explain with AI"
+                          >
+                            <RiRobot2Line size={18} />
+                          </button>
+                          <button
+                            onClick={() => handleEdit(chart)}
+                            className="p-1 hover:text-blue-600"
+                          >
+                            <FiEdit size={18} />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(chart.chart_id)}
+                            className="p-1 hover:text-red-600"
+                          >
+                            <FiTrash2 size={18} />
+                          </button>
+                        </div>
 
                         {/* Chart body */}
                         <div className="p-4 pb-0">
@@ -1389,63 +1749,89 @@ const handleExplainChart = async (chartObj) => {
             <div className="p-4 overflow-auto max-h-[calc(80vh-3rem)]">
               {explainLoading && (
                 <div className="flex items-center justify-center py-8">
-                  <div className="text-sm text-gray-600">Analyzing chart with AI...</div>
+                  <div className="text-sm text-gray-600">
+                    Analyzing chart with AI...
+                  </div>
                 </div>
               )}
-              
+
               {explainError && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-4">
                   <div className="text-red-800 text-sm font-medium">Error</div>
-                  <div className="text-red-700 text-sm mt-1">{explainError}</div>
+                  <div className="text-red-700 text-sm mt-1">
+                    {explainError}
+                  </div>
                 </div>
               )}
-              
+
               {explainResponse && (
                 <div className="space-y-4">
                   <div>
-                    <h3 className="font-semibold text-gray-900 mb-2">Analysis</h3>
-                    <p className="text-sm text-gray-700">{explainResponse.response}</p>
+                    <h3 className="font-semibold text-gray-900 mb-2">
+                      Analysis
+                    </h3>
+                    <p className="text-sm text-gray-700">
+                      {explainResponse.response}
+                    </p>
                   </div>
-                  
-                  {explainResponse.business_value && explainResponse.business_value.length > 0 && (
-                    <div>
-                      <h3 className="font-semibold text-gray-900 mb-2">Business Value</h3>
-                      <ul className="space-y-1">
-                        {explainResponse.business_value.map((value, index) => (
-                          <li key={index} className="text-sm text-gray-700 flex items-start gap-2">
-                            <span className="text-green-600 mt-1">•</span>
-                            <span>{value}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                  
-                  {explainResponse.suggestions && explainResponse.suggestions.length > 0 && (
-                    <div>
-                      <h3 className="font-semibold text-gray-900 mb-2">Suggestions</h3>
-                      <ul className="space-y-1">
-                        {explainResponse.suggestions.map((suggestion, index) => (
-                          <li key={index} className="text-sm text-gray-700 flex items-start gap-2">
-                            <span className="text-blue-600 mt-1">•</span>
-                            <span>{suggestion}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                  
+
+                  {explainResponse.business_value &&
+                    explainResponse.business_value.length > 0 && (
+                      <div>
+                        <h3 className="font-semibold text-gray-900 mb-2">
+                          Business Value
+                        </h3>
+                        <ul className="space-y-1">
+                          {explainResponse.business_value.map(
+                            (value, index) => (
+                              <li
+                                key={index}
+                                className="text-sm text-gray-700 flex items-start gap-2"
+                              >
+                                <span className="text-green-600 mt-1">•</span>
+                                <span>{value}</span>
+                              </li>
+                            )
+                          )}
+                        </ul>
+                      </div>
+                    )}
+
+                  {explainResponse.suggestions &&
+                    explainResponse.suggestions.length > 0 && (
+                      <div>
+                        <h3 className="font-semibold text-gray-900 mb-2">
+                          Suggestions
+                        </h3>
+                        <ul className="space-y-1">
+                          {explainResponse.suggestions.map(
+                            (suggestion, index) => (
+                              <li
+                                key={index}
+                                className="text-sm text-gray-700 flex items-start gap-2"
+                              >
+                                <span className="text-blue-600 mt-1">•</span>
+                                <span>{suggestion}</span>
+                              </li>
+                            )
+                          )}
+                        </ul>
+                      </div>
+                    )}
+
                   {explainResponse.caveat && (
                     <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                      <div className="text-yellow-800 text-xs font-medium uppercase tracking-wide">Caveat</div>
-                      <div className="text-yellow-700 text-sm mt-1">{explainResponse.caveat}</div>
+                      <div className="text-yellow-800 text-xs font-medium uppercase tracking-wide">
+                        Caveat
+                      </div>
+                      <div className="text-yellow-700 text-sm mt-1">
+                        {explainResponse.caveat}
+                      </div>
                     </div>
                   )}
-                  
-                 
                 </div>
               )}
-              
+
               {!explainLoading && !explainError && !explainResponse && (
                 <div className="text-sm text-gray-500">
                   Click "Explain with AI" to get insights about this chart.

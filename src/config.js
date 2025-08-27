@@ -3,7 +3,7 @@ const getBaseUrl = () => {
 };
 
 export const url = {
-  BASE_URL: "https://odoodemo.byteloom.ai",
+  BASE_URL: "https://backend.techfinna.ai",
 };
 export const authUrl = {
   BASE_URL: "https://backend.techfinna.com",

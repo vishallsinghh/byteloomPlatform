@@ -219,171 +219,175 @@ function Home() {
     }
   };
 
-const handleAutomaticDatasetCreation = async () => {
-  try {
-    const { value: name } = await Swal.fire({
-      title: "Enter Dataset name",
-      text: "Preferably provide proper name for the dataset. (Example: Sales Report)",
-      input: "text",
-      inputPlaceholder: "Dataset name...",
-      showCancelButton: true,
-      allowOutsideClick: false,
-      allowEscapeKey: false,
-      inputValidator: (value) => {
-        const regex = /^[A-Za-z0-9 ]+$/;
-        if (!value) {
-          return "Dataset name is required!";
-        } else if (!regex.test(value)) {
-          return "Only letters, numbers, and spaces are allowed.";
-        } else if (value.length > 60) {
-          return "Maximum 60 characters allowed.";
-        }
-        return null;
-      },
-    });
+  const handleAutomaticDatasetCreation = async () => {
+    try {
+      const { value: name } = await Swal.fire({
+        title: "Enter Dataset name",
+        text: "Preferably provide proper name for the dataset. (Example: Sales Report)",
+        input: "text",
+        inputPlaceholder: "Dataset name...",
+        showCancelButton: true,
+        allowOutsideClick: false,
+        allowEscapeKey: false,
+        inputValidator: (value) => {
+          const regex = /^[A-Za-z0-9 ]+$/;
+          if (!value) {
+            return "Dataset name is required!";
+          } else if (!regex.test(value)) {
+            return "Only letters, numbers, and spaces are allowed.";
+          } else if (value.length > 60) {
+            return "Maximum 60 characters allowed.";
+          }
+          return null;
+        },
+      });
 
-    if (!name) {
-      setAiLoaderMessage("Dataset creation cancelled by user");
-      await new Promise((r) => setTimeout(r, 1000));
-      return;
-    }
-
-    const confirmation = await Swal.fire({
-      title: "Are you sure?",
-      text: "Do you want to create this dataset?",
-      icon: "question",
-      showCancelButton: true,
-      confirmButtonText: "Yes, create it",
-      cancelButtonText: "No, cancel",
-      allowOutsideClick: false,
-      allowEscapeKey: false,
-    });
-
-    if (!confirmation.isConfirmed) {
-      setAiLoaderMessage("Dataset creation cancelled by user");
-      await new Promise((r) => setTimeout(r, 1000));
-      return;
-    }
-
-    setAiLoaderMessage("Creating dataset...");
-    setpageLoading(true);
-
-    const authCheck = ensureAuthOrRedirect({ requireDB: true });
-    if (!authCheck.ok) return;
-
-    // Create the same selected_columns structure as in handleSubmit and preview
-    const selectedColumns = {};
-    Object.entries(selectedTablesRef.current).forEach(([tableName, data]) => {
-      const table = tablesRef.current.find((t) => t.name === tableName); // Fixed: Use tablesRef
-      if (!table) {
-        console.warn(`Table ${tableName} not found during dataset creation`);
+      if (!name) {
+        setAiLoaderMessage("Dataset creation cancelled by user");
+        await new Promise((r) => setTimeout(r, 1000));
         return;
       }
 
-      const relationCols = [];
-      const regularCols = [];
-
-      data.columns.forEach((colName) => {
-        const col = table.columns.find((c) => c.name === colName);
-        if (col?.relation) {
-          relationCols.push({
-            [col.name]: [
-              {
-                relation: col.relation.replace(/\./g, "_").toLowerCase(),
-                referenced_column: col.referenced_column || "id",
-              },
-            ],
-          });
-        } else {
-          regularCols.push(col.name);
-        }
+      const confirmation = await Swal.fire({
+        title: "Are you sure?",
+        text: "Do you want to create this dataset?",
+        icon: "question",
+        showCancelButton: true,
+        confirmButtonText: "Yes, create it",
+        cancelButtonText: "No, cancel",
+        allowOutsideClick: false,
+        allowEscapeKey: false,
       });
 
-      selectedColumns[tableName] = [...regularCols, ...relationCols];
-    });
-
-    const schema = localStorage.getItem("db_schema");
-    if (!schema) {
-      toast.error("Schema is missing. Delete this connection and create a new one.");
-      return;
-    }
-
-    // Step 1: Call field_mapping with the same payload structure as preview + table_name
-    const fieldMappingPayload = {
-      selected_columns: selectedColumns, // Same as preview payload
-      db_token: authCheck.dbToken,
-      schema: schema,
-      table_name: name.toLowerCase().replace(/\s+/g, "_"), // Additional field for field_mapping
-    };
-
-    try {
-      const { res: res1, json } = await apiFetch(
-        `${authUrl.BASE_URL}/dataset/field_mapping/`,
-        {
-          method: "POST",
-          body: JSON.stringify(fieldMappingPayload),
-        }
-      );
-
-      if (!res1.ok) {
-        throw new Error(json?.message || `HTTP error! status: ${res1.status}`);
+      if (!confirmation.isConfirmed) {
+        setAiLoaderMessage("Dataset creation cancelled by user");
+        await new Promise((r) => setTimeout(r, 1000));
+        return;
       }
 
-      if (json?.success) {
-        setResponseData(json.data || []);
-        if (json.sql_query) {
-          setSql(json.sql_query);
+      setAiLoaderMessage("Creating dataset...");
+      setpageLoading(true);
+
+      const authCheck = ensureAuthOrRedirect({ requireDB: true });
+      if (!authCheck.ok) return;
+
+      // Create the same selected_columns structure as in handleSubmit and preview
+      const selectedColumns = {};
+      Object.entries(selectedTablesRef.current).forEach(([tableName, data]) => {
+        const table = tablesRef.current.find((t) => t.name === tableName); // Fixed: Use tablesRef
+        if (!table) {
+          console.warn(`Table ${tableName} not found during dataset creation`);
+          return;
         }
-        setOpenModal("response");
 
-        if (json.id && json.created_table_name) {
-          setAiLoaderMessage("Generating dataset charts...");
+        const relationCols = [];
+        const regularCols = [];
 
-          // Step 2: Call generate_dataset with the same base payload + created table name
-          const generatePayload = {
-            selected_columns: selectedColumns, // Same as preview payload
-            db_token: authCheck.dbToken,
-            schema: schema,
-            table_name: json.created_table_name, // Use the created table name from field_mapping response
-          };
+        data.columns.forEach((colName) => {
+          const col = table.columns.find((c) => c.name === colName);
+          if (col?.relation) {
+            relationCols.push({
+              [col.name]: [
+                {
+                  relation: col.relation.replace(/\./g, "_").toLowerCase(),
+                  referenced_column: col.referenced_column || "id",
+                },
+              ],
+            });
+          } else {
+            regularCols.push(col.name);
+          }
+        });
 
-          const { res: generateRes, json: generateJson } = await apiFetch(
-            `${authUrl.BASE_URL}/dataset/generate_dataset/`,
-            {
-              method: "POST",
-              body: JSON.stringify(generatePayload),
-            }
+        selectedColumns[tableName] = [...regularCols, ...relationCols];
+      });
+
+      const schema = localStorage.getItem("db_schema");
+      if (!schema) {
+        toast.error(
+          "Schema is missing. Delete this connection and create a new one."
+        );
+        return;
+      }
+
+      // Step 1: Call field_mapping with the same payload structure as preview + table_name
+      const fieldMappingPayload = {
+        selected_columns: selectedColumns, // Same as preview payload
+        db_token: authCheck.dbToken,
+        schema: schema,
+        table_name: name.toLowerCase().replace(/\s+/g, "_"), // Additional field for field_mapping
+      };
+
+      try {
+        const { res: res1, json } = await apiFetch(
+          `${authUrl.BASE_URL}/dataset/field_mapping/`,
+          {
+            method: "POST",
+            body: JSON.stringify(fieldMappingPayload),
+          }
+        );
+
+        if (!res1.ok) {
+          throw new Error(
+            json?.message || `HTTP error! status: ${res1.status}`
           );
+        }
 
-          if (generateRes.ok && generateJson?.success) {
-            setAiLoaderMessage("Redirecting to gallery...");
-            setTimeout(() => {
-              navigate("/gallery");
-            }, 1000);
+        if (json?.success) {
+          setResponseData(json.data || []);
+          if (json.sql_query) {
+            setSql(json.sql_query);
+          }
+          setOpenModal("response");
+
+          if (json.id && json.created_table_name) {
+            setAiLoaderMessage("Generating dataset charts...");
+
+            // Step 2: Call generate_dataset with the same base payload + created table name
+            const generatePayload = {
+              selected_columns: selectedColumns, // Same as preview payload
+              db_token: authCheck.dbToken,
+              schema: schema,
+              table_name: json.created_table_name, // Use the created table name from field_mapping response
+            };
+
+            const { res: generateRes, json: generateJson } = await apiFetch(
+              `${authUrl.BASE_URL}/dataset/generate_dataset/`,
+              {
+                method: "POST",
+                body: JSON.stringify(generatePayload),
+              }
+            );
+
+            if (generateRes.ok && generateJson?.success) {
+              setAiLoaderMessage("Redirecting to gallery...");
+              setTimeout(() => {
+                navigate("/gallery");
+              }, 1000);
+            }
+          }
+        } else {
+          if (json?.message && json.message.includes("already exists")) {
+            Swal.fire({
+              title: "Name already exists!",
+              text: `Dataset with name "${name}" already exists.`,
+              icon: "warning",
+              confirmButtonText: "Ok",
+            });
+          } else {
+            throw new Error(json?.message || "Failed to create dataset");
           }
         }
-      } else {
-        if (json?.message && json.message.includes("already exists")) {
-          Swal.fire({
-            title: "Name already exists!",
-            text: `Dataset with name "${name}" already exists.`,
-            icon: "warning",
-            confirmButtonText: "Ok",
-          });
-        } else {
-          throw new Error(json?.message || "Failed to create dataset");
-        }
+      } catch (error) {
+        setAiLoaderMessage("Dataset creation failed");
+        throw error;
+      } finally {
+        setpageLoading(false);
       }
     } catch (error) {
       setAiLoaderMessage("Dataset creation failed");
-      throw error;
-    } finally {
-      setpageLoading(false);
     }
-  } catch (error) {
-    setAiLoaderMessage("Dataset creation failed");
-  }
-};
+  };
   // ENHANCED simulateAITableSelectionFromPreset with canvas scrolling
   const simulateAITableSelectionFromPreset = async (presetKey) => {
     try {
@@ -430,7 +434,6 @@ const handleAutomaticDatasetCreation = async () => {
 
       console.log("Tables in processing order:", tableNames);
       console.log("Main table identified:", mainTableName);
-      
 
       // 3) Open Tables panel with visual feedback
       setAiLoaderMessage("Opening Tables panel...");
@@ -564,35 +567,37 @@ const handleAutomaticDatasetCreation = async () => {
       await new Promise((r) => setTimeout(r, 100));
 
       // Create output object from selected tables
-     // Create output object from selected tables
-const output = {};
-console.log(`selectedTables at completion:`, selectedTablesRef.current);
+      // Create output object from selected tables
+      const output = {};
+      console.log(`selectedTables at completion:`, selectedTablesRef.current);
 
-Object.entries(selectedTablesRef.current).forEach(([tableName, data]) => {
-  const table = tablesRef.current.find((t) => t.name === tableName); // Use tablesRef instead of tables
-  if (!table) {
-    console.warn(`Table ${tableName} not found in tables array during output generation`);
-    return;
-  }
-  const relationCols = [];
-  const regularCols = [];
-  data.columns.forEach((colName) => {
-    const col = table.columns.find((c) => c.name === colName);
-    if (col?.relation) {
-      relationCols.push({
-        [col.name]: [
-          {
-            relation: col.relation.replace(/\./g, "_").toLowerCase(),
-            referenced_column: col.referenced_column || "id",
-          },
-        ],
+      Object.entries(selectedTablesRef.current).forEach(([tableName, data]) => {
+        const table = tablesRef.current.find((t) => t.name === tableName); // Use tablesRef instead of tables
+        if (!table) {
+          console.warn(
+            `Table ${tableName} not found in tables array during output generation`
+          );
+          return;
+        }
+        const relationCols = [];
+        const regularCols = [];
+        data.columns.forEach((colName) => {
+          const col = table.columns.find((c) => c.name === colName);
+          if (col?.relation) {
+            relationCols.push({
+              [col.name]: [
+                {
+                  relation: col.relation.replace(/\./g, "_").toLowerCase(),
+                  referenced_column: col.referenced_column || "id",
+                },
+              ],
+            });
+          } else {
+            regularCols.push(col.name);
+          }
+        });
+        output[tableName] = [...regularCols, ...relationCols];
       });
-    } else {
-      regularCols.push(col.name);
-    }
-  });
-  output[tableName] = [...regularCols, ...relationCols];
-});
 
       if (Object.keys(output).length === 0) {
         toast.error("No columns selected for any tables");
@@ -619,42 +624,42 @@ Object.entries(selectedTablesRef.current).forEach(([tableName, data]) => {
       };
 
       try {
-  setAiLoaderMessage("Generating preview...");
-  const { res, json } = await apiFetch(
-    `${authUrl.BASE_URL}/dataset/preview/`,
-    {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }
-  );
+        setAiLoaderMessage("Generating preview...");
+        const { res, json } = await apiFetch(
+          `${authUrl.BASE_URL}/dataset/preview/`,
+          {
+            method: "POST",
+            body: JSON.stringify(payload),
+          }
+        );
 
-  console.log("Preview API response:", json); // Add this debug log
+        console.log("Preview API response:", json); // Add this debug log
 
-  if (res.ok && json?.status && shouldContinueAutomation.current) {
-    let previewData = [];
-    if (json.data?.data && Array.isArray(json.data.data)) {
-      previewData = json.data.data;
-    } else if (json.data && Array.isArray(json.data)) {
-      previewData = json.data;
-    }
+        if (res.ok && json?.status && shouldContinueAutomation.current) {
+          let previewData = [];
+          if (json.data?.data && Array.isArray(json.data.data)) {
+            previewData = json.data.data;
+          } else if (json.data && Array.isArray(json.data)) {
+            previewData = json.data;
+          }
 
-    setResponseData(previewData);
-    setSql(json.sql || "");
-    sqlRef.current = json.sql || "";
-    console.log("Generated SQL:", json.sql);
-    setOpenModal("response");
-  } else {
-    console.error("Preview generation failed:", json);
-    toast.error("Failed to generate preview");
-    return;
-  }
-} catch (error) {
-  console.error("Preview API error:", error);
-  if (shouldContinueAutomation.current) {
-    toast.error("Failed to generate preview: " + error.message);
-  }
-  return;
-}
+          setResponseData(previewData);
+          setSql(json.sql || "");
+          sqlRef.current = json.sql || "";
+          console.log("Generated SQL:", json.sql);
+          setOpenModal("response");
+        } else {
+          console.error("Preview generation failed:", json);
+          toast.error("Failed to generate preview");
+          return;
+        }
+      } catch (error) {
+        console.error("Preview API error:", error);
+        if (shouldContinueAutomation.current) {
+          toast.error("Failed to generate preview: " + error.message);
+        }
+        return;
+      }
 
       if (!shouldContinueAutomation.current) return;
 
@@ -1365,59 +1370,60 @@ Object.entries(selectedTablesRef.current).forEach(([tableName, data]) => {
   };
 
   // Toggle column selection (and auto-add related tables)
- const toggleColumn = (tableName, column) => {
-  setSelectedTables((prev) => {
-    const entry = prev[tableName];
-    if (!entry) return prev;
+  const toggleColumn = (tableName, column) => {
+    setSelectedTables((prev) => {
+      const entry = prev[tableName];
+      if (!entry) return prev;
 
-    const isSelected = entry.columns.includes(column.name);
-    const newCols = isSelected
-      ? entry.columns.filter((c) => c !== column.name)
-      : [...entry.columns, column.name];
+      const isSelected = entry.columns.includes(column.name);
+      const newCols = isSelected
+        ? entry.columns.filter((c) => c !== column.name)
+        : [...entry.columns, column.name];
 
-    const updated = {
-      ...prev,
-      [tableName]: {
-        ...entry,
-        columns: newCols,
-      },
-    };
+      const updated = {
+        ...prev,
+        [tableName]: {
+          ...entry,
+          columns: newCols,
+        },
+      };
 
-    if (column.relation) {
-      const normalized = column.relation.replace(/\./g, "_").toLowerCase();
-      const relatedTable = tablesRef.current.find( // Use tablesRef here too
-        (t) => t.name.toLowerCase() === normalized
-      )?.name;
+      if (column.relation) {
+        const normalized = column.relation.replace(/\./g, "_").toLowerCase();
+        const relatedTable = tablesRef.current.find(
+          // Use tablesRef here too
+          (t) => t.name.toLowerCase() === normalized
+        )?.name;
 
-      if (!isSelected) {
-        if (relatedTable && !prev[relatedTable]) {
-          handleTableSelect(relatedTable);
-        }
-      } else {
-        if (relatedTable) {
-          const stillReferenced = Object.entries(updated).some(
-            ([tbl, data]) =>
-              data.columns.some((colName) => {
-                const colMeta = tablesRef.current // Use tablesRef here too
-                  .find((t) => t.name === tbl)
-                  ?.columns.find((c) => c.name === colName);
-                return (
-                  colMeta?.relation &&
-                  colMeta.relation.replace(/\./g, "_").toLowerCase() ===
-                    normalized
-                );
-              })
-          );
-          if (!stillReferenced) {
-            delete updated[relatedTable];
+        if (!isSelected) {
+          if (relatedTable && !prev[relatedTable]) {
+            handleTableSelect(relatedTable);
+          }
+        } else {
+          if (relatedTable) {
+            const stillReferenced = Object.entries(updated).some(
+              ([tbl, data]) =>
+                data.columns.some((colName) => {
+                  const colMeta = tablesRef.current // Use tablesRef here too
+                    .find((t) => t.name === tbl)
+                    ?.columns.find((c) => c.name === colName);
+                  return (
+                    colMeta?.relation &&
+                    colMeta.relation.replace(/\./g, "_").toLowerCase() ===
+                      normalized
+                  );
+                })
+            );
+            if (!stillReferenced) {
+              delete updated[relatedTable];
+            }
           }
         }
       }
-    }
 
-    return updated;
-  });
-};
+      return updated;
+    });
+  };
 
   // Recompute edges & nodes when selections change
   useEffect(() => {
@@ -1515,34 +1521,36 @@ Object.entries(selectedTablesRef.current).forEach(([tableName, data]) => {
     if (!authCheck.ok) return;
 
     // Create output object from selected tables
-const output = {};
-console.log(`selectedTables at completion:`, selectedTablesRef.current);
+    const output = {};
+    console.log(`selectedTables at completion:`, selectedTablesRef.current);
 
-Object.entries(selectedTablesRef.current).forEach(([tableName, data]) => {
-  const table = tablesRef.current.find((t) => t.name === tableName); // Use tablesRef instead of tables
-  if (!table) {
-    console.warn(`Table ${tableName} not found in tables array during output generation`);
-    return;
-  }
-  const relationCols = [];
-  const regularCols = [];
-  data.columns.forEach((colName) => {
-    const col = table.columns.find((c) => c.name === colName);
-    if (col?.relation) {
-      relationCols.push({
-        [col.name]: [
-          {
-            relation: col.relation.replace(/\./g, "_").toLowerCase(),
-            referenced_column: col.referenced_column || "id",
-          },
-        ],
+    Object.entries(selectedTablesRef.current).forEach(([tableName, data]) => {
+      const table = tablesRef.current.find((t) => t.name === tableName); // Use tablesRef instead of tables
+      if (!table) {
+        console.warn(
+          `Table ${tableName} not found in tables array during output generation`
+        );
+        return;
+      }
+      const relationCols = [];
+      const regularCols = [];
+      data.columns.forEach((colName) => {
+        const col = table.columns.find((c) => c.name === colName);
+        if (col?.relation) {
+          relationCols.push({
+            [col.name]: [
+              {
+                relation: col.relation.replace(/\./g, "_").toLowerCase(),
+                referenced_column: col.referenced_column || "id",
+              },
+            ],
+          });
+        } else {
+          regularCols.push(col.name);
+        }
       });
-    } else {
-      regularCols.push(col.name);
-    }
-  });
-  output[tableName] = [...regularCols, ...relationCols];
-});
+      output[tableName] = [...regularCols, ...relationCols];
+    });
 
     if (Object.keys(output).length === 0) {
       toast.error("Please select at least one table with columns");
@@ -1632,162 +1640,169 @@ Object.entries(selectedTablesRef.current).forEach(([tableName, data]) => {
   // Enhanced table list rendering focusing on main table
 
   // Updated handleGenerateCharts function for the new API structure
-const handleGenerateCharts = async () => {
-  const authCheck = ensureAuthOrRedirect({ requireDB: true });
-  if (!authCheck.ok) return;
+  const handleGenerateCharts = async () => {
+    const authCheck = ensureAuthOrRedirect({ requireDB: true });
+    if (!authCheck.ok) return;
 
-  const { value: name } = await Swal.fire({
-    title: "Enter Dataset name",
-    text: "Preferably provide proper name for the dataset. (Example: Sales Report)",
-    input: "text",
-    inputPlaceholder: "Dataset name...",
-    showCancelButton: true,
-    inputValidator: (value) => {
-      const regex = /^[A-Za-z0-9 ]+$/;
-      if (!value) {
-        return "Dataset name is required!";
-      } else if (!regex.test(value)) {
-        return "Only letters, numbers, and spaces are allowed.";
-      } else if (value.length > 60) {
-        return "Maximum 60 characters allowed.";
-      }
-      return null;
-    },
-  });
-
-  if (!name) return;
-
-  const confirmation = await Swal.fire({
-    title: "Are you sure?",
-    text: "Do you want to create this dataset?",
-    icon: "question",
-    showCancelButton: true,
-    confirmButtonText: "Yes, create it",
-    cancelButtonText: "No, cancel",
-  });
-
-  if (!confirmation.isConfirmed) return;
-
-  // Create the same selected_columns structure as in handleSubmit
-  const selectedColumns = {};
-  Object.entries(selectedTablesRef.current).forEach(([tableName, data]) => {
-    const table = tablesRef.current.find((t) => t.name === tableName); // Fixed: Use tablesRef
-    if (!table) return;
-
-    const relationCols = [];
-    const regularCols = [];
-
-    data.columns.forEach((colName) => {
-      const col = table.columns.find((c) => c.name === colName);
-      if (col?.relation) {
-        relationCols.push({
-          [col.name]: [
-            {
-              relation: col.relation.replace(/\./g, "_").toLowerCase(),
-              referenced_column: col.referenced_column || "id",
-            },
-          ],
-        });
-      } else {
-        regularCols.push(col.name);
-      }
+    const { value: name } = await Swal.fire({
+      title: "Enter Dataset name",
+      text: "Preferably provide proper name for the dataset. (Example: Sales Report)",
+      input: "text",
+      inputPlaceholder: "Dataset name...",
+      showCancelButton: true,
+      inputValidator: (value) => {
+        const regex = /^[A-Za-z0-9 ]+$/;
+        if (!value) {
+          return "Dataset name is required!";
+        } else if (!regex.test(value)) {
+          return "Only letters, numbers, and spaces are allowed.";
+        } else if (value.length > 60) {
+          return "Maximum 60 characters allowed.";
+        }
+        return null;
+      },
     });
 
-    selectedColumns[tableName] = [...regularCols, ...relationCols];
-  });
+    if (!name) return;
 
-  const schema = localStorage.getItem("db_schema");
-  if (!schema) {
-    toast.error("Schema is missing. Delete this connection and create a new one.");
-    return;
-  }
+    const confirmation = await Swal.fire({
+      title: "Are you sure?",
+      text: "Do you want to create this dataset?",
+      icon: "question",
+      showCancelButton: true,
+      confirmButtonText: "Yes, create it",
+      cancelButtonText: "No, cancel",
+    });
 
-  // Step 1: Call field_mapping
-  const fieldMappingPayload = {
-    selected_columns: selectedColumns,
-    db_token: authCheck.dbToken,
-    schema: schema,
-    table_name: name.toLowerCase().replace(/\s+/g, "_"),
-  };
+    if (!confirmation.isConfirmed) return;
 
-  try {
-    setpageLoading(true);
+    // Create the same selected_columns structure as in handleSubmit
+    const selectedColumns = {};
+    Object.entries(selectedTablesRef.current).forEach(([tableName, data]) => {
+      const table = tablesRef.current.find((t) => t.name === tableName); // Fixed: Use tablesRef
+      if (!table) return;
 
-    const { res: res1, json } = await apiFetch(
-      `${authUrl.BASE_URL}/dataset/field_mapping/`,
-      {
-        method: "POST",
-        body: JSON.stringify(fieldMappingPayload),
-      }
-    );
+      const relationCols = [];
+      const regularCols = [];
 
-    if (!res1.ok) {
-      throw new Error(json?.message || `HTTP error! status: ${res1.status}`);
+      data.columns.forEach((colName) => {
+        const col = table.columns.find((c) => c.name === colName);
+        if (col?.relation) {
+          relationCols.push({
+            [col.name]: [
+              {
+                relation: col.relation.replace(/\./g, "_").toLowerCase(),
+                referenced_column: col.referenced_column || "id",
+              },
+            ],
+          });
+        } else {
+          regularCols.push(col.name);
+        }
+      });
+
+      selectedColumns[tableName] = [...regularCols, ...relationCols];
+    });
+
+    const schema = localStorage.getItem("db_schema");
+    if (!schema) {
+      toast.error(
+        "Schema is missing. Delete this connection and create a new one."
+      );
+      return;
     }
 
-    if (json?.success) {
-      setResponseData(json.data || []);
-      if (json.sql_query) {
-        setSql(json.sql_query);
+    // Step 1: Call field_mapping
+    const fieldMappingPayload = {
+      selected_columns: selectedColumns,
+      db_token: authCheck.dbToken,
+      schema: schema,
+      table_name: name.toLowerCase().replace(/\s+/g, "_"),
+    };
+
+    try {
+      setpageLoading(true);
+
+      const { res: res1, json } = await apiFetch(
+        `${authUrl.BASE_URL}/dataset/field_mapping/`,
+        {
+          method: "POST",
+          body: JSON.stringify(fieldMappingPayload),
+        }
+      );
+
+      if (!res1.ok) {
+        throw new Error(json?.message || `HTTP error! status: ${res1.status}`);
       }
-      setOpenModal("response");
 
-      if (json.id && json.created_table_name) {
-        // Step 2: Call generate_dataset
-        const generatePayload = {
-          selected_columns: selectedColumns,
-          db_token: authCheck.dbToken,
-          schema: schema,
-          table_name: json.created_table_name,
-        };
+      if (json?.success) {
+        setResponseData(json.data || []);
+        if (json.sql_query) {
+          setSql(json.sql_query);
+        }
+        setOpenModal("response");
 
-        const { res: generateRes, json: generateJson } = await apiFetch(
-          `${authUrl.BASE_URL}/dataset/generate_dataset/`,
-          {
-            method: "POST",
-            body: JSON.stringify(generatePayload),
-          }
-        );
+        if (json.id && json.created_table_name) {
+          // Step 2: Call generate_dataset
+          const generatePayload = {
+            selected_columns: selectedColumns,
+            db_token: authCheck.dbToken,
+            schema: schema,
+            table_name: json.created_table_name,
+          };
 
-        if (generateRes.ok && generateJson?.success) {
-          Swal.fire({
-            title: "Dataset Created Successfully!",
-            icon: "success",
-            showCancelButton: true,
-            confirmButtonText: "View in Gallery",
-            cancelButtonText: "Stay Here",
-          }).then((result) => {
-            if (result.isConfirmed) {
-              navigate("/gallery");
+          const { res: generateRes, json: generateJson } = await apiFetch(
+            `${authUrl.BASE_URL}/dataset/generate_dataset/`,
+            {
+              method: "POST",
+              body: JSON.stringify(generatePayload),
             }
+          );
+
+          if (generateRes.ok && generateJson?.success) {
+            console.log("Dataset generation successful:", generateJson);
+            console.log("Generated dataset ID:", json.id);
+            Swal.fire({
+              title: "Dataset Created Successfully!",
+              icon: "success",
+              showCancelButton: true,
+              confirmButtonText: "View AI built Dashboard",
+              cancelButtonText: "Stay Here",
+            }).then((result) => {
+              if (result.isConfirmed) {
+                console.log(`result=`, json.id);
+                navigate(`/view-dashboard?id=${json.id}`);
+              }
+            });
+          }
+        }
+      } else {
+        if (json?.message && json.message.includes("already exists")) {
+          Swal.fire({
+            title: "Name already exists!",
+            text: `Dataset with name "${name}" already exists. Please choose a different name.`,
+            icon: "warning",
+            confirmButtonText: "Ok",
           });
+        } else {
+          throw new Error(json?.message || "Failed to create dataset");
         }
       }
-    } else {
-      if (json?.message && json.message.includes("already exists")) {
+    } catch (error) {
+      if (error.message !== "Token not valid") {
         Swal.fire({
-          title: "Name already exists!",
-          text: `Dataset with name "${name}" already exists. Please choose a different name.`,
-          icon: "warning",
+          title: "Failed to Create Dataset",
+          text:
+            error.message ||
+            "An unexpected error occurred while creating the dataset.",
+          icon: "error",
           confirmButtonText: "Ok",
         });
-      } else {
-        throw new Error(json?.message || "Failed to create dataset");
       }
+    } finally {
+      setpageLoading(false);
     }
-  } catch (error) {
-    if (error.message !== "Token not valid") {
-      Swal.fire({
-        title: "Failed to Create Dataset",
-        text: error.message || "An unexpected error occurred while creating the dataset.",
-        icon: "error",
-        confirmButtonText: "Ok",
-      });
-    }
-  } finally {
-    setpageLoading(false);
-  }
-};
+  };
 
   // Filtered lists
   const filteredTables = tables.filter((t) =>
@@ -2403,7 +2418,7 @@ const handleGenerateCharts = async () => {
                                   key={preset.key}
                                   onClick={async () => {
                                     setActivePanel(null);
-                                   
+
                                     await simulateAITableSelectionFromPreset(
                                       preset.key
                                     );
