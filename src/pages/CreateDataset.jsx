@@ -1057,13 +1057,23 @@ function Home() {
 
     setpageLoading(true);
 
+    const token = localStorage.getItem("accessToken");
     apiFetch(`${authUrl.BASE_URL}/dataset/info/`, {
-      method: "POST",
-      body: JSON.stringify({ db_token: authCheck.dbToken }),
+      method: "GET",
+      headers:{
+        Authorization: `Bearer ${token}`,
+      }
+      // body: JSON.stringify({ db_token: authCheck.dbToken }),
     })
       .then(({ res, json }) => {
         if (!res.ok) throw new Error(`Network error: ${res.status}`);
-        setDatasets(Array.isArray(json?.data) ? json.data : []);
+        const normalized = Array.isArray(json?.data)
+         ? json.data.map(d => ({
+             id: d.id,
+             name: d.name ?? d.dataset_name ?? "",   // support both old/new keys
+           }))
+         : [];
+       setDatasets(normalized);
       })
       .catch((err) => console.error("Error fetching datasets:", err))
       .finally(() => setpageLoading(false));

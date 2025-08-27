@@ -441,7 +441,7 @@ function DraggableDashboard() {
     const id = searchParams.get("datasetId");
     if (!id) return;
     setDatasetId(id);
-    fetch(`${url.BASE_URL}/dataset/chart/${id}`)
+    fetch(`${url.BASE_URL}/dataset/char/${id}`)
       .then((r) => {
         if (!r.ok) throw new Error("Network error");
         return r.json();

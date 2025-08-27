@@ -155,7 +155,7 @@ function EditChartDashboard() {
     async function loadChart() {
       try {
         // 1) get raw dataset for fieldOptions
-        const dsRes = await fetch(`${url.BASE_URL}/dataset/chart/${datasetId}`);
+        const dsRes = await fetch(`${url.BASE_URL}/dataset/char/${datasetId}`);
         const dsJson = await dsRes.json();
         setDatasetData(dsJson);
 
