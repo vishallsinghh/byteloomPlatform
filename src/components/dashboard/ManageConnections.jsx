@@ -214,7 +214,7 @@ export default function DatabaseConnections() {
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" >
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {connections.map((conn, idx) => {
                 const type = databaseTypes[conn.type] || {};
                 return (
@@ -225,7 +225,17 @@ export default function DatabaseConnections() {
                     transition={{ delay: idx * 0.1 }}
                   >
                     <div
-                      onClick={handleRedirect(conn.id)}
+                      onClick={() => {
+                        // allow redirect only if schemas are fetched
+                        const schemas = schemasByConn[conn.id]?.list;
+                        if (!schemas || schemas.length === 0) {
+                          toast.error(
+                            "Please wait, schemas are still loading."
+                          );
+                          return;
+                        }
+                        handleRedirect(conn.id)();
+                      }}
                       className={`bg-white rounded-lg shadow p-4 border ${type.borderColor} cursor-pointer`}
                     >
                       <div className="flex justify-between">
