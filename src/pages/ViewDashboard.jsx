@@ -1702,7 +1702,7 @@ selectedNameRef.current = datasetName; // Add this line
     if (!isConfirmed) return
     try {
       const response = await fetch(
-        `${authUrl.BASE_URL}/dataset/delete/chart/${chartId}`,
+        `${authUrl.BASE_URL}/dataset/chart/${chartId}`,
         {
           method: 'DELETE',
           headers: {

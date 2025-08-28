@@ -441,12 +441,27 @@ function DraggableDashboard() {
     const id = searchParams.get("datasetId");
     if (!id) return;
     setDatasetId(id);
-    fetch(`${url.BASE_URL}/dataset/char/${id}`)
+    const dbToken = localStorage.getItem("db_token");
+    const token = localStorage.getItem("accessToken");
+    const payload ={
+      db_token: dbToken,
+      dataset_id: id
+    }
+    fetch(`${url.BASE_URL}/dataset/dataset1000rows/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload)
+      }
+    )
       .then((r) => {
         if (!r.ok) throw new Error("Network error");
         return r.json();
       })
-      .then(setTableData)
+       .then((payload) => {
+   // NEW API returns { message, success, data: [...] }
+   const normalized = Array.isArray(payload) ? payload : (payload?.data ?? []);
+   setTableData(normalized);
+ })
       .catch(console.error);
   }, [searchParams]);
 
@@ -465,6 +480,7 @@ function DraggableDashboard() {
       yFields: c.type.includes("multi") ? [""] : undefined,
       aggFns: c.type.includes("multi") ? ["sum"] : undefined,
       selectedColumns: [],
+      orderBy: c.orderBy || "",
     }));
     setCharts(loaded);
   }, [tableData]);
@@ -506,6 +522,7 @@ function DraggableDashboard() {
       yFields: type.includes("multi") ? [""] : undefined,
       aggFns: type.includes("multi") ? ["sum"] : undefined,
       selectedColumns: [],
+      orderBy: "",
     };
     setCharts((p) => [...p, newC]);
     setIsDirty(true);
@@ -513,7 +530,19 @@ function DraggableDashboard() {
     setSearchTab("Data & Filters");
     setSelectedChartId(newC.id);
   };
-
+  function getOrderByOptions(chart) {
+    // start with X
+    const opts = [chart.xField];
+    // then Y-series, whether single or multi
+    if (chart.type === "multi_bar" || chart.type === "multi_line") {
+      opts.push(...chart.yFields);
+    } else if (chart.type !== "grid" && chart.type !== "worldmap" && chart.type !== "heatmap") {
+      // for simple charts
+      opts.push(chart.yField);
+    }
+    // drop blanks and dupes
+    return Array.from(new Set(opts.filter((f) => f)));
+  }
   const moveChart = (id, pos) =>
     setCharts((p) => p.map((c) => (c.id === id ? { ...c, position: pos } : c)));
   const resizeChart = moveChart;
@@ -532,6 +561,8 @@ function DraggableDashboard() {
 
   // Save to backend
   const createNewChart = async () => {
+    const dbToken = localStorage.getItem("db_token");
+    const token = localStorage.getItem("accessToken");
     if (
       selectedChart.type !== "grid" &&
       selectedChart.type !== "worldmap" &&
@@ -566,6 +597,7 @@ function DraggableDashboard() {
     let payload;
     if (selectedChart.type === "grid") {
       payload = {
+        db_token: dbToken,
         dataset_id: parseInt(datasetId, 10),
         chart_title: editableName,
         chart_type: "grid",
@@ -573,6 +605,7 @@ function DraggableDashboard() {
       };
     } else if (["multi_bar", "multi_line"].includes(selectedChart.type)) {
       payload = {
+        db_token: dbToken,
         dataset_id: parseInt(datasetId, 10),
         chart_title: editableName,
         chart_type: selectedChart.type,
@@ -583,6 +616,7 @@ function DraggableDashboard() {
       };
     } else {
       payload = {
+        db_token: dbToken,
         dataset_id: parseInt(datasetId, 10),
         chart_title: editableName,
         chart_type: selectedChart.type,
@@ -590,17 +624,22 @@ function DraggableDashboard() {
         y_axis: `${selectedChart.aggFn}(${selectedChart.yField})`,
       };
     }
+// include order_by if user picked it
+if (selectedChart.orderBy) {
+  payload.order_by = selectedChart.orderBy;
+}
 
+    
     try {
-      const res = await fetch(`${url.BASE_URL}/api/dataset/create/chart`, {
+      const res = await fetch(`${url.BASE_URL}/dataset/create/chart/`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(payload),
       });
       if (res.status === 201) {
         setIsDirty(false);
         Swal.fire("Success!", "Chart added", "success").then(() =>
-          navigate(`/gallery?datasetId=${datasetId}`)
+          navigate(`/view-dashboard?id=${datasetId}`)
         );
       } else {
         const errorText = await res.text();
@@ -1097,6 +1136,25 @@ function DraggableDashboard() {
                                 </div>
                               ))}
                               {/* …the rest of your “Add value” button… */}
+                                  {/* ————— Order By (multi-series) ————— */}
+    <div>
+      <label className="block text-xs mb-1">Order By</label>
+      <select
+        className="w-full py-2 px-3 rounded-md bg-white border text-gray-800"
+        value={selectedChart.orderBy}
+        onChange={(e) =>
+          onFieldChange(selectedChartId, "orderBy", e.target.value)
+        }
+      >
+        <option value="">— select field —</option>
+        {getOrderByOptions(selectedChart).map((field) => (
+          <option key={field} value={field}>
+            {field}
+          </option>
+        ))}
+      </select>
+    </div>
+
                             </>
                           ) : (
                             /* ————— single-series UI ————— */
@@ -1149,6 +1207,28 @@ function DraggableDashboard() {
                                       </option>
                                     )
                                   )}
+                                </select>
+                              </div>
+                              {/* ————— Order By ————— */}
+                              <div>
+                                <label className="block text-xs mb-1">Order By</label>
+                                <select
+                                  className="w-full py-2 px-3 rounded-md bg-white border text-gray-800"
+                                  value={selectedChart.orderBy}
+                                  onChange={(e) =>
+                                    onFieldChange(
+                                      selectedChartId,
+                                      "orderBy",
+                                      e.target.value
+                                    )
+                                  }
+                                >
+                                  <option value="">— select field —</option>
+                                  {getOrderByOptions(selectedChart).map((field) => (
+                                    <option key={field} value={field}>
+                                      {field}
+                                    </option>
+                                  ))}
                                 </select>
                               </div>
                             </>

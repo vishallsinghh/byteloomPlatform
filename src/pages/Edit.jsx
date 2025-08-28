@@ -40,6 +40,8 @@ function EditChartDashboard() {
   const [aggFns, setAggFns] = useState([]);
   const [error, setError] = useState("");
   const [userChangedFields, setUserChangedFields] = useState(false);
+  const [orderBy, setOrderBy] = useState("");
+
   // ADD: Store original category order from backend
   const [originalCategories, setOriginalCategories] = useState([]);
 
@@ -154,25 +156,48 @@ function EditChartDashboard() {
 
     async function loadChart() {
       try {
+
+        const dbToken = localStorage.getItem("db_token");
+        const token = localStorage.getItem("accessToken");
         // 1) get raw dataset for fieldOptions
-        const dsRes = await fetch(`${url.BASE_URL}/dataset/char/${datasetId}`);
+        const dsRes = await fetch(`${url.BASE_URL}/dataset/dataset1000rows/`,
+         {
+          method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ db_token: dbToken, dataset_id: datasetId })
+         }
+        );
+
         const dsJson = await dsRes.json();
-        setDatasetData(dsJson);
+        setDatasetData(Array.isArray(dsJson) ? dsJson : (dsJson?.data ?? []));
 
         // 2) get chart config + data
-        const chRes = await fetch(`${url.BASE_URL}/api/chart/${chartid}/data`);
-        const chJson = await chRes.json();
-        if (!chJson.data || !chJson.chart_type) {
-          setError("Invalid chart data received from backend.");
-          return;
-        }
+        const chRes = await fetch(`${url.BASE_URL}/dataset/chart/${chartid}/data/`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ db_token: dbToken, dataset_id: datasetId })
 
-        // 3) normalize type
-        const typeKey = chJson.chart_type.toLowerCase();
-        setChartType(typeKey);
+          }
+        );
+    const chJson = await chRes.json();
 
-        // 4) normalize y_axis into array of "fn(field)"
-        const rawY = chJson.y_axis;
+// NEW: unwrap { message, success, data: { chart fields..., data: {labels, datasets} } }
+const chartObj = chJson?.data || {};
+const chartDataObj = chartObj?.data || {};
+
+if (!chartObj.chart_type) {
+  setError("Invalid chart data received from backend.");
+  return;
+}
+
+// 3) normalize type
+const typeKey = chartObj.chart_type.toLowerCase();
+setChartType(typeKey);
+
+// 4) normalize y_axis into array of "fn(field)"
+const rawY = chartObj.y_axis;
+
         const parts = Array.isArray(rawY)
           ? rawY
           : (typeof rawY === 'string'
@@ -183,7 +208,7 @@ function EditChartDashboard() {
         const initY = [];
         const initA = [];
         parts.forEach(item => {
-          const m = item.match(/^\s*(\w+)\(([\w_]+)\)\s*$/);
+          const m = item.match(/^\s*(\w+)\(\s*(?:DISTINCT\s+)?([\w_]+)\s*\)\s*$/i);
           if (m) {
             initA.push(m[1].toLowerCase());
             initY.push(m[2]);
@@ -207,12 +232,14 @@ function EditChartDashboard() {
         }
 
         // 8) other chart state
-        setChartTitle(chJson.chart_title || "");
-        setXField(chJson.x_axis);
-        
+        setChartTitle(chartObj.chart_title || "");
+setXField(chartObj.x_axis);
+
+        setOrderBy(chartObj.order_by || "");
+
         // **KEY CHANGES: Store original categories and use backend data**
-        setOriginalCategories(chJson.data.labels || []);
-        setChartData(chJson.data);
+   setOriginalCategories(chartDataObj.labels || []);
+setChartData(chartDataObj);
         setUserChangedFields(false);
 
       } catch (err) {
@@ -362,10 +389,17 @@ function EditChartDashboard() {
     ? Object.keys(flattenFields(datasetData[0]))
     : [];
 
-  function getPalette(typeKey) {
-    if (typeKey === "line" || typeKey === "scatter") return LINE_COLORS;
-    return OTHER_COLORS;
+ function getOrderByOptions() {
+  const opts = [];
+  if (xField) opts.push(xField);
+  if (["multi_bar", "multi_line"].includes(chartType)) {
+    opts.push(...(yFields || []));
+  } else if (yField) {
+    opts.push(yField);
   }
+  return Array.from(new Set(opts.filter(Boolean)));
+}
+
 
   function getHighchartsOptions() {
     const typeKey = chartType.toLowerCase();
@@ -535,19 +569,28 @@ function EditChartDashboard() {
       if (!yField) {
         return Swal.fire("Error", "Please select a Y-axis field.", "error");
       }
+      const token = localStorage.getItem("accessToken");
+      if (!token) {
+        return Swal.fire("Error", "You must be logged in to save.", "error");
+      }
+      const dbToken = localStorage.getItem("db_token");
+      if (!dbToken) {
+        return Swal.fire("Error", "Database connection info missing.", "error");
+      }
       // build single-series payload
       const payload = {
         chart_title: chartTitle,
         chart_type: chartType,
         x_axis: xField,
         y_axis: `${aggFn}(${yField})`,
+        db_token: dbToken
       };
-
+if (orderBy) payload.order_by = orderBy;
       const res = await fetch(
-        `${url.BASE_URL}/api/dataset/chart/${chartid}`,
+        `${url.BASE_URL}/dataset/chart/${chartid}/update/`,
         {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify(payload),
         }
       );
@@ -555,7 +598,7 @@ function EditChartDashboard() {
       if (res.ok) {
         setUserChangedFields(false);
         Swal.fire("Success!", "Chart updated.", "success").then(() =>
-          navigate(`/gallery?datasetId=${datasetId}`)
+          navigate(`/view-dashboard?id=${datasetId}`)
         );
       } else {
         Swal.fire("Error", "Failed to update chart", "error");
@@ -856,6 +899,20 @@ function EditChartDashboard() {
                 ))}
               </select>
             </div>
+            <div>
+  <label className="block mb-1">Order By</label>
+  <select
+    value={orderBy}
+    onChange={e => { setOrderBy(e.target.value); setUserChangedFields(true); }}
+    className="w-full py-2 px-3 rounded-md bg-white border text-gray-800"
+  >
+    <option value="">— select field —</option>
+    {getOrderByOptions().map(f => (
+      <option key={f} value={f}>{f}</option>
+    ))}
+  </select>
+</div>
+
           </>
         )}
       </div>
