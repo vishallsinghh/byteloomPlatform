@@ -910,7 +910,49 @@ const handleSendMessage = async () => {
     ]);
   }
 };
+const handleCreateChart = async (chartData) => {
+  if (!chartData || !token || !dbToken || !id) {
+    toast.error("Missing required data to create chart");
+    return;
+  }
 
+  try {
+    const payload = {
+      db_token: dbToken,
+      dataset_id: parseInt(id, 10),
+      chart_title: `AI Generated ${chartData.chart_type.charAt(0).toUpperCase() + chartData.chart_type.slice(1)} Chart`,
+      chart_type: chartData.chart_type,
+      x_axis: chartData.x_axis,
+      y_axis: chartData.y_axis,
+    };
+
+    const response = await fetch(`${authUrl.BASE_URL}/dataset/create/chart/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to create chart: ${response.status}`);
+    }
+
+    const result = await response.json();
+
+    if (result.success) {
+      toast.success("Chart created successfully!");
+      // Refresh the dashboard to show the new chart
+      await loadAll();
+    } else {
+      throw new Error(result.message || "Failed to create chart");
+    }
+  } catch (error) {
+    console.error("Error creating chart:", error);
+    toast.error(`Failed to create chart: ${error.message}`);
+  }
+};
 
  const changeDataset = (id) => {
     navigate(`/gallery?datasetId=${id}`);
@@ -1072,50 +1114,53 @@ const handleSendMessage = async () => {
           );
   
         case "create_chart":
-          return (
-            <div className="space-y-3">
-              <div className="flex items-center space-x-2">
-                <FiBarChart className="text-indigo-500" size={16} />
-                <span className="text-sm font-medium text-gray-700">
-                  Chart Creation
-                </span>
-              </div>
-  
-              <div className="bg-indigo-50 rounded-lg p-3 space-y-2">
-                <div className="flex items-center space-x-2">
-                  <span className="text-xs bg-indigo-200 text-indigo-800 px-2 py-1 rounded">
-                    {data?.chart_type?.toUpperCase()}
-                  </span>
-                </div>
-  
-                <div className="text-sm text-gray-700">
-                  <div>
-                    <strong>X-Axis:</strong> {data?.x_axis}
-                  </div>
-                  <div>
-                    <strong>Y-Axis:</strong> {data?.y_axis}
-                  </div>
-                </div>
-  
-                <p className="text-sm text-gray-600 italic">
-                  {data?.explanation}
-                </p>
-  
-                {data?.sql_query && (
-                  <div className="bg-gray-100 rounded p-2 text-xs font-mono text-gray-600">
-                    {data.sql_query}
-                  </div>
-                )}
-              </div>
-  
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-2">
-                <div className="text-xs text-yellow-800">
-                  🚀 Automatic chart creation feature coming soon to your
-                  dashboard!
-                </div>
-              </div>
-            </div>
-          );
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center space-x-2">
+        <FiBarChart className="text-indigo-500" size={16} />
+        <span className="text-sm font-medium text-gray-700">
+          Chart Creation
+        </span>
+      </div>
+
+      <div className="bg-indigo-50 rounded-lg p-3 space-y-2">
+        <div className="flex items-center space-x-2">
+          <span className="text-xs bg-indigo-200 text-indigo-800 px-2 py-1 rounded">
+            {data?.chart_type?.toUpperCase()}
+          </span>
+        </div>
+
+        <div className="text-sm text-gray-700">
+          <div>
+            <strong>X-Axis:</strong> {data?.x_axis}
+          </div>
+          <div>
+            <strong>Y-Axis:</strong> {data?.y_axis}
+          </div>
+        </div>
+
+        <p className="text-sm text-gray-600 italic">
+          {data?.explanation}
+        </p>
+
+        {data?.sql_query && (
+          <div className="bg-gray-100 rounded p-2 text-xs font-mono text-gray-600">
+            {data.sql_query}
+          </div>
+        )}
+      </div>
+
+      {/* Add the create chart button */}
+      <div className="flex space-x-2">
+        <button
+          onClick={() => handleCreateChart(data)}
+          className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium"
+        >
+          Create Chart
+        </button>
+      </div>
+    </div>
+  );
   
         case "other":
           return (
