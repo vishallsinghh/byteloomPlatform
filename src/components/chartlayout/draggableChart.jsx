@@ -59,6 +59,7 @@ const DraggableChart = ({
   onRemove,
   data,
   globalFilter,
+  appliedFilters = [],
   customData,
   rawData,
   onClick,
@@ -95,7 +96,8 @@ const DraggableChart = ({
     setAggFn(aggFn2);
   }, [aggFn2]);
 
-  
+ 
+
 
   // Title edit handlers
   const handleTitleClick = () => setEditing(true);
@@ -122,7 +124,42 @@ const DraggableChart = ({
     return byRegion && byPartner && byMonth && byTime;
   };
   const filtered = (rows) => (rows || []).filter(applyFilters);
+ const getByPath = (obj, path) =>
+    (path || "").split(".").reduce((o, p) => (o && o[p] != null ? o[p] : undefined), obj);
 
+   function applyAllFilters(rows, filters) {
+    if (!filters?.length) return rows || [];
+    const norm = (v) => (typeof v === "string" ? v.toLowerCase() : v);
+    return (rows || []).filter(row =>
+      filters.every(f => {
+        const val = getByPath(row, f.column);
+        if (val == null) return false;
+
+        if (Array.isArray(f.value) && f.operator === "between") {
+          const t = new Date(val).getTime();
+          const a = new Date(f.value[0]).getTime();
+          const b = new Date(f.value[1]).getTime();
+          if (isNaN(t) || isNaN(a) || isNaN(b)) return false;
+          return t >= Math.min(a, b) && t <= Math.max(a, b);
+        }
+
+        const numVal = Number(val), numCmp = Number(f.value);
+        if (!isNaN(numVal) && !isNaN(numCmp)) {
+          if (f.operator === "=") return numVal === numCmp;
+          if (f.operator === ">") return numVal > numCmp;
+          if (f.operator === "<") return numVal < numCmp;
+        }
+
+        const sVal = String(val).toLowerCase();
+        const sNeedle = String(f.value).toLowerCase();
+        if (f.operator === "contains") return sVal.includes(sNeedle);
+        if (f.operator === "begins_with") return sVal.startsWith(sNeedle);
+        if (f.operator === "ends_with") return sVal.endsWith(sNeedle);
+
+        return norm(val) === norm(f.value);
+      })
+    );
+  }
   // Aggregate helper
   const aggregateField = (rows, field, fn) => {
     if (!xField || !field) return { labels: [], values: [] };
@@ -151,12 +188,16 @@ const DraggableChart = ({
   };
 
   // Determine source rows
-  const sourceRows =
+  const baseRows =
     customData && rawData
-      ? filtered(rawData)
+      ? rawData
       : customData?.datasets?.length
-      ? []
-      : filtered(data);
+        ? []
+        : data;
+  // step 1: global filters (existing)
+  const globallyFiltered = filtered(baseRows);
+  // step 2: sidebar-applied filters (new)
+  const sourceRows = applyAllFilters(globallyFiltered, appliedFilters);
 
   // Build flat rows & all columns
   const flatRows = sourceRows.map((r) => flattenObject(r));
