@@ -601,7 +601,6 @@ export default function ViewDashboard() {
 
   // chatbot states
     const [activePanel, setActivePanel] = useState(null);
-    const [showChatbot, setShowChatbot] = useState(false);
     const [chatMessages, setChatMessages] = useState([]);
     const [chatInput, setChatInput] = useState("");
     const [isTyping, setIsTyping] = useState(false);
@@ -962,226 +961,52 @@ const handleCreateChart = async (chartData) => {
   const scrollToBottom = () => {
     chatMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
+  
   // Enhanced AI Message Component
-    const renderAIMessage = (message) => {
-      const { intent, data } = message.aiResponse || {};
-  
-      switch (intent) {
-        case "greeting":
-          return (
-            <div className="space-y-2">
-              <div className="flex items-center space-x-2">
-                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                <span className="text-sm font-medium text-gray-700">
-                  Greeting
-                </span>
-              </div>
-              <p className="text-sm text-gray-700">{data?.response}</p>
-            </div>
-          );
-  
-        case "analyze_chart":
-          return (
-            <div className="space-y-3">
-              <div className="flex items-center space-x-2">
-                <FiPieChart className="text-blue-500" size={16} />
-                <span className="text-sm font-medium text-gray-700">
-                  Chart Analysis
-                </span>
-              </div>
-  
-              <div className="bg-blue-50 rounded-lg p-3 space-y-2">
-                <p className="text-sm text-gray-700">{data?.response}</p>
-  
-                {data?.data_insights && (
-                  <div className="space-y-2">
-                    <div className="text-xs font-medium text-gray-600">
-                      Key Insights:
-                    </div>
-                    <div className="text-xs text-gray-600">
-                      Total: {data.data_insights.total}
-                    </div>
-                    {data.data_insights.top_labels
-                      ?.slice(0, 3)
-                      .map((item, idx) => (
-                        <div
-                          key={idx}
-                          className="flex justify-between text-xs text-gray-600"
-                        >
-                          <span>{item.label}:</span>
-                          <span>
-                            {item.value} ({(item.percent * 100).toFixed(1)}%)
-                          </span>
-                        </div>
-                      ))}
-                  </div>
-                )}
-  
-                {data?.inference && (
-                  <div className="text-xs text-blue-700 italic border-l-2 border-blue-300 pl-2">
-                    {data.inference}
-                  </div>
-                )}
-              </div>
-  
-              {data?.suggestions && data.suggestions.length > 0 && (
-                <div className="space-y-1">
-                  <div className="text-xs font-medium text-gray-600">
-                    Suggestions:
-                  </div>
-                  {data.suggestions.map((suggestion, idx) => (
-                    <div
-                      key={idx}
-                      className="text-xs text-gray-600 flex items-start space-x-1"
-                    >
-                      <span className="text-green-500 mt-0.5">•</span>
-                      <span>{suggestion}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-  
-        case "analyze_kpi":
-          return (
-            <div className="space-y-3">
-              <div className="flex items-center space-x-2">
-                <FiTrendingUp className="text-green-500" size={16} />
-                <span className="text-sm font-medium text-gray-700">
-                  KPI Analysis
-                </span>
-              </div>
-  
-              <div className="bg-green-50 rounded-lg p-3 space-y-2">
-                <p className="text-sm text-gray-700">{data?.response}</p>
-  
-                {data?.sql_suggestion && (
-                  <div className="bg-gray-100 rounded p-2 text-xs font-mono text-gray-600">
-                    {data.sql_suggestion}
-                  </div>
-                )}
-              </div>
-  
-              {data?.suggestions && data.suggestions.length > 0 && (
-                <div className="space-y-1">
-                  <div className="text-xs font-medium text-gray-600">
-                    Recommendations:
-                  </div>
-                  {data.suggestions.map((suggestion, idx) => (
-                    <div
-                      key={idx}
-                      className="text-xs text-gray-600 flex items-start space-x-1"
-                    >
-                      <span className="text-green-500 mt-0.5">•</span>
-                      <span>{suggestion}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-  
-        case "create_kpi":
-          return (
-            <div className="space-y-3">
-              <div className="flex items-center space-x-2">
-                <FiTrendingUp className="text-purple-500" size={16} />
-                <span className="text-sm font-medium text-gray-700">
-                  KPI Creation
-                </span>
-              </div>
-  
-              <div className="bg-purple-50 rounded-lg p-3 space-y-2">
-                <div className="text-sm font-medium text-gray-800">
-                  {data?.kpi_name}
-                </div>
-                <p className="text-sm text-gray-700">{data?.expression}</p>
-  
-                {data?.sql_query && (
-                  <div className="bg-gray-100 rounded p-2 text-xs font-mono text-gray-600">
-                    {data.sql_query}
-                  </div>
-                )}
-              </div>
-  
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-2">
-                <div className="text-xs text-yellow-800">
-                  🚀 We're adding automatic KPI creation to your dashboard soon!
-                </div>
-              </div>
-            </div>
-          );
-  
-        case "create_chart":
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center space-x-2">
-        <FiBarChart className="text-indigo-500" size={16} />
-        <span className="text-sm font-medium text-gray-700">
-          Chart Creation
-        </span>
-      </div>
+   const renderAIMessage = (message) => {
+  const ai = message.aiResponse || {};
+  const { intent, data } = ai;
 
-      <div className="bg-indigo-50 rounded-lg p-3 space-y-2">
-        <div className="flex items-center space-x-2">
-          <span className="text-xs bg-indigo-200 text-indigo-800 px-2 py-1 rounded">
-            {data?.chart_type?.toUpperCase()}
-          </span>
+  // ✅ Read confidence from either place and normalize to a number
+  const rawConf =
+    ai.confidence !== undefined ? ai.confidence :
+    data?.confidence !== undefined ? data.confidence :
+    undefined;
+
+  const conf = typeof rawConf === "string" ? parseFloat(rawConf) : rawConf;
+
+  const note =
+    conf !== undefined && !Number.isNaN(conf) && conf < 0.5 ? (
+      <div className="mt-2 text-xs text-yellow-700 italic bg-yellow-50 border border-yellow-200 rounded p-2">
+        ⚠️ Note: the response I have given may be less accurate. The AI chatbot is still in development stage.
+      </div>
+    ) : null;
+
+  switch (intent) {
+    case "analyze_chart":
+      return (
+        <div className="space-y-3">
+          {/* ...your existing analyze_chart UI... */}
+          <div className="bg-blue-50 rounded-lg p-3 space-y-2">
+            <p className="text-sm text-gray-700">{data?.response}</p>
+            {/* rest of your block */}
+          </div>
+          {note} {/* ← add this at the end of the block */}
         </div>
+      );
 
-        <div className="text-sm text-gray-700">
-          <div>
-            <strong>X-Axis:</strong> {data?.x_axis}
-          </div>
-          <div>
-            <strong>Y-Axis:</strong> {data?.y_axis}
-          </div>
+    // repeat `{note}` at the end of other intent blocks…
+
+    default:
+      return (
+        <div>
+          <p className="text-sm text-gray-700">{message.text}</p>
+          {note}
         </div>
+      );
+  }
+};
 
-        <p className="text-sm text-gray-600 italic">
-          {data?.explanation}
-        </p>
-
-        {data?.sql_query && (
-          <div className="bg-gray-100 rounded p-2 text-xs font-mono text-gray-600">
-            {data.sql_query}
-          </div>
-        )}
-      </div>
-
-      {/* Add the create chart button */}
-      <div className="flex space-x-2">
-        <button
-          onClick={() => handleCreateChart(data)}
-          className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium"
-        >
-          Create Chart
-        </button>
-      </div>
-    </div>
-  );
-  
-        case "other":
-          return (
-            <div className="space-y-2">
-              <div className="flex items-center space-x-2">
-                <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
-                <span className="text-sm font-medium text-gray-700">
-                  General Query
-                </span>
-              </div>
-              <p className="text-sm text-gray-700">{data?.response}</p>
-              <div className="text-xs text-gray-500 italic">
-                For data-related questions, try asking about your charts or KPIs!
-              </div>
-            </div>
-          );
-  
-        default:
-          return <p className="text-sm text-gray-700">{message.text}</p>;
-      }
-    };
   // Delete a dataset
   const handleDeleteDataset = async (ds, e) => {
     e.stopPropagation();
