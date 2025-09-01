@@ -962,6 +962,8 @@ const handleCreateChart = async (chartData) => {
     chatMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
   
+   
+  
   // Enhanced AI Message Component
    const renderAIMessage = (message) => {
   const ai = message.aiResponse || {};
@@ -983,6 +985,19 @@ const handleCreateChart = async (chartData) => {
     ) : null;
 
   switch (intent) {
+     case "greeting":
+          return (
+            <div className="space-y-2">
+              <div className="flex items-center space-x-2">
+                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                <span className="text-sm font-medium text-gray-700">
+                  Greeting
+                </span>
+              </div>
+              <p className="text-sm text-gray-700">{data?.response}</p>
+            </div>
+          );
+  
     case "analyze_chart":
       return (
         <div className="space-y-3">
@@ -994,16 +1009,144 @@ const handleCreateChart = async (chartData) => {
           {note} {/* ← add this at the end of the block */}
         </div>
       );
+   
+     case "analyze_kpi":
+          return (
+            <div className="space-y-3">
+              <div className="flex items-center space-x-2">
+                <FiTrendingUp className="text-green-500" size={16} />
+                <span className="text-sm font-medium text-gray-700">
+                  KPI Analysis
+                </span>
+              </div>
+  
+              <div className="bg-green-50 rounded-lg p-3 space-y-2">
+                <p className="text-sm text-gray-700">{data?.response}</p>
+  
+                {data?.sql_suggestion && (
+                  <div className="bg-gray-100 rounded p-2 text-xs font-mono text-gray-600">
+                    {data.sql_suggestion}
+                  </div>
+                )}
+              </div>
+  
+              {data?.suggestions && data.suggestions.length > 0 && (
+                <div className="space-y-1">
+                  <div className="text-xs font-medium text-gray-600">
+                    Recommendations:
+                  </div>
+                  {data.suggestions.map((suggestion, idx) => (
+                    <div
+                      key={idx}
+                      className="text-xs text-gray-600 flex items-start space-x-1"
+                    >
+                      <span className="text-green-500 mt-0.5">•</span>
+                      <span>{suggestion}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+  
+        case "create_kpi":
+          return (
+            <div className="space-y-3">
+              <div className="flex items-center space-x-2">
+                <FiTrendingUp className="text-purple-500" size={16} />
+                <span className="text-sm font-medium text-gray-700">
+                  KPI Creation
+                </span>
+              </div>
+  
+              <div className="bg-purple-50 rounded-lg p-3 space-y-2">
+                <div className="text-sm font-medium text-gray-800">
+                  {data?.kpi_name}
+                </div>
+                <p className="text-sm text-gray-700">{data?.expression}</p>
+  
+                {data?.sql_query && (
+                  <div className="bg-gray-100 rounded p-2 text-xs font-mono text-gray-600">
+                    {data.sql_query}
+                  </div>
+                )}
+              </div>
+  
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-2">
+                <div className="text-xs text-yellow-800">
+                  🚀 We're adding automatic KPI creation to your dashboard soon!
+                </div>
+              </div>
+            </div>
+          );
+  
+        case "create_chart":
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center space-x-2">
+        <FiBarChart className="text-indigo-500" size={16} />
+        <span className="text-sm font-medium text-gray-700">
+          Chart Creation
+        </span>
+      </div>
 
-    // repeat `{note}` at the end of other intent blocks…
-
-    default:
-      return (
-        <div>
-          <p className="text-sm text-gray-700">{message.text}</p>
-          {note}
+      <div className="bg-indigo-50 rounded-lg p-3 space-y-2">
+        <div className="flex items-center space-x-2">
+          <span className="text-xs bg-indigo-200 text-indigo-800 px-2 py-1 rounded">
+            {data?.chart_type?.toUpperCase()}
+          </span>
         </div>
-      );
+
+        <div className="text-sm text-gray-700">
+          <div>
+            <strong>X-Axis:</strong> {data?.x_axis}
+          </div>
+          <div>
+            <strong>Y-Axis:</strong> {data?.y_axis}
+          </div>
+        </div>
+
+        <p className="text-sm text-gray-600 italic">
+          {data?.explanation}
+        </p>
+
+        {data?.sql_query && (
+          <div className="bg-gray-100 rounded p-2 text-xs font-mono text-gray-600">
+            {data.sql_query}
+          </div>
+        )}
+      </div>
+
+      {/* Add the create chart button */}
+      <div className="flex space-x-2">
+        <button
+          onClick={() => handleCreateChart(data)}
+          className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium"
+        >
+          Create Chart
+        </button>
+      </div>
+    </div>
+  );
+  
+        case "other":
+          return (
+            <div className="space-y-2">
+              <div className="flex items-center space-x-2">
+                <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
+                <span className="text-sm font-medium text-gray-700">
+                  General Query
+                </span>
+              </div>
+              <p className="text-sm text-gray-700">{data?.response}</p>
+              <div className="text-xs text-gray-500 italic">
+                For data-related questions, try asking about your charts or KPIs!
+              </div>
+            </div>
+          );
+  
+        default:
+          return <p className="text-sm text-gray-700">{message.text}</p>;
   }
 };
 
