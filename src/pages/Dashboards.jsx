@@ -33,12 +33,14 @@ const Dashboards = () => {
         return;
       }
     try {
-      const res = await fetch(`${authUrl.BASE_URL}/dataset/info`,{
-        method: 'GET',
+      const res = await fetch(`${authUrl.BASE_URL}/dataset/info/`,{
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
-      }})
+      },
+        body: JSON.stringify({ db_token: dbToken })
+    })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
     console.log("Fetched dashboards:", data)
@@ -142,7 +144,7 @@ const deleteDashboard = async (id, dashboardName) => {
                   </button>
 
                   <span className="text-2xl font-bold first-letter:uppercase text-center text-gray-800">
-                    {d.dataset_name}
+                    {d.name}
                   </span>
                 </div>
               </Link>
