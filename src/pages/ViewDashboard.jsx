@@ -23,13 +23,43 @@ import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 
 // Highcharts
-import Highcharts from "highcharts"
-import HighchartsReact from "highcharts-react-official"
 import worldMap from "@highcharts/map-collection/custom/world.geo.json"
-import "highcharts/highcharts-more"
-import "highcharts/modules/stock"
-import "highcharts/modules/map"
-import "highcharts/modules/boost" 
+import Highcharts from "highcharts";
+import HighchartsReact from "highcharts-react-official";
+import "highcharts/highcharts-more";
+import "highcharts/modules/stock";
+import "highcharts/modules/map";
+import "highcharts/modules/boost";
+
+// Reduce work: disable global animation; prefer local time
+Highcharts.setOptions({
+  chart: { animation: false },
+  plotOptions: {
+    series: {
+      animation: false,
+      states: {
+        hover: { halo: { size: 0 } },
+        inactive: { opacity: 1 },
+      },
+    }
+  },
+  time: { useUTC: false },
+  boost: {
+    useGPUTranslations: true,
+    seriesThreshold: 1, // boost as early as possible if data is big
+  },
+  credits: { enabled: false },
+});
+
+// shallow compare utility
+const shallowEqual = (a, b) => {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== "object" || typeof b !== "object" || !a || !b) return false;
+  const ka = Object.keys(a), kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  for (const k of ka) if (!Object.is(a[k], b[k])) return false;
+  return true;
+};
 
 
 // Constants
@@ -85,7 +115,7 @@ function readCache(datasetId, widgetId, dbToken) {
   try { return JSON.parse(sessionStorage.getItem(cacheKey(datasetId, widgetId, dbToken))) } catch { return null }
 }
 function writeCache(datasetId, widgetId, dbToken, value) {
-  try { sessionStorage.setItem(cacheKey(datasetId, widgetId, dbToken), JSON.stringify(value)) } catch {}
+  try { sessionStorage.setItem(cacheKey(datasetId, widgetId, dbToken), JSON.stringify(value)) } catch { }
 }
 
 // ---------- small utils ----------
@@ -114,63 +144,76 @@ const isDateType = (t = '') => /(date|timestamp|time zone|^1082$|^1114$|^1184$)/
 const isBooleanType = (t = '') => /(boolean|^16$)/i.test(normTypeStr(t))
 const isJsonType = (t = '') => /(jsonb?|^114$|^3802$)/i.test(normTypeStr(t))
 const isTextType = (t = '') => /(varchar|character varying|text|^25$|^1043$)/i.test(normTypeStr(t))
-function categorizeColumnType(t){ const s = normTypeStr(t); if(!s) return 'other'; if(isDateType(s)) return 'date'; if(isBooleanType(s)) return 'boolean'; if(isNumericType(s)) return 'number'; if(isJsonType(s)) return 'json'; if(isTextType(s)) return 'text'; return 'other' }
+function categorizeColumnType(t) { const s = normTypeStr(t); if (!s) return 'other'; if (isDateType(s)) return 'date'; if (isBooleanType(s)) return 'boolean'; if (isNumericType(s)) return 'number'; if (isJsonType(s)) return 'json'; if (isTextType(s)) return 'text'; return 'other' }
 
-const TEXT_OPS = ['contains','not_contains','begins_with','ends_with']
-const NUM_OPS = ['=','!=','>','<']
-const BOOL_OPS = ['=','!=','in','not_in','is_empty','is_not_empty']
-const prettyOp = (op)=>({contains:'Contains',not_contains:'Not contains',begins_with:'Begins with',ends_with:'Ends with','=':'Equals','!=':'Not equal','>':'Greater than','<':'Less than','>=':'Greater or equal','<=':'Less or equal',between:'Between',in_ranges:'In selected ranges',in:'In',not_in:'Not in',is_empty:'Is empty',is_not_empty:'Is not empty'}[op]||op)
+const TEXT_OPS = ['contains', 'not_contains', 'begins_with', 'ends_with']
+const NUM_OPS = ['=', '!=', '>', '<']
+const BOOL_OPS = ['=', '!=', 'in', 'not_in', 'is_empty', 'is_not_empty']
+const prettyOp = (op) => ({ contains: 'Contains', not_contains: 'Not contains', begins_with: 'Begins with', ends_with: 'Ends with', '=': 'Equals', '!=': 'Not equal', '>': 'Greater than', '<': 'Less than', '>=': 'Greater or equal', '<=': 'Less or equal', between: 'Between', in_ranges: 'In selected ranges', in: 'In', not_in: 'Not in', is_empty: 'Is empty', is_not_empty: 'Is not empty' }[op] || op)
 
-const fmtNumber = (n)=>{ const abs=Math.abs(n); if(abs>=1e9) return `${(n/1e9).toFixed(1).replace(/\.0$/,'')}B`; if(abs>=1e6) return `${(n/1e6).toFixed(1).replace(/\.0$/,'')}M`; if(abs>=1e3) return `${(n/1e3).toFixed(1).replace(/\.0$/,'')}k`; return `${n}` }
+const fmtNumber = (n) => { const abs = Math.abs(n); if (abs >= 1e9) return `${(n / 1e9).toFixed(1).replace(/\.0$/, '')}B`; if (abs >= 1e6) return `${(n / 1e6).toFixed(1).replace(/\.0$/, '')}M`; if (abs >= 1e3) return `${(n / 1e3).toFixed(1).replace(/\.0$/, '')}k`; return `${n}` }
 
-function niceStep(span,maxBins=12){ if(!isFinite(span)||span<=0) return 1; const rough=span/Math.max(1,maxBins); const pow10=Math.pow(10,Math.floor(Math.log10(rough))); const base=rough/pow10; const niceBase=base<=1?1:base<=2?2:base<=5?5:10; return niceBase*pow10 }
-function computeNumericBins(values,maxBins=12){ const nums=values.map(Number).filter(v=>isFinite(v)); if(!nums.length) return []; const min=Math.min(...nums); const max=Math.max(...nums); if(min===max){ return [{key:`${min}..${max}`,start:min,end:max,label:fmtNumber(min),c:nums.length,isRange:true}] } const step=Math.max(niceStep(max-min,maxBins),Number.EPSILON); const startEdge=Math.floor(min/step)*step; const endEdge=Math.ceil(max/step)*step; const bins=[]; for(let a=startEdge;a<endEdge;a+=step){ const b=a+step; bins.push({key:`${a}..${b}`,start:a,end:b,label:`${fmtNumber(a)}–${fmtNumber(b)}`,c:0,isRange:true}) } nums.forEach(v=>{ const idx=Math.min(Math.floor((v-startEdge)/step),bins.length-1); bins[idx].c+=1 }); while(bins.length&&bins[0].c===0) bins.shift(); while(bins.length&&bins[bins.length-1].c===0) bins.pop(); return bins }
+function niceStep(span, maxBins = 12) { if (!isFinite(span) || span <= 0) return 1; const rough = span / Math.max(1, maxBins); const pow10 = Math.pow(10, Math.floor(Math.log10(rough))); const base = rough / pow10; const niceBase = base <= 1 ? 1 : base <= 2 ? 2 : base <= 5 ? 5 : 10; return niceBase * pow10 }
+function computeNumericBins(values, maxBins = 12) { const nums = values.map(Number).filter(v => isFinite(v)); if (!nums.length) return []; const min = Math.min(...nums); const max = Math.max(...nums); if (min === max) { return [{ key: `${min}..${max}`, start: min, end: max, label: fmtNumber(min), c: nums.length, isRange: true }] } const step = Math.max(niceStep(max - min, maxBins), Number.EPSILON); const startEdge = Math.floor(min / step) * step; const endEdge = Math.ceil(max / step) * step; const bins = []; for (let a = startEdge; a < endEdge; a += step) { const b = a + step; bins.push({ key: `${a}..${b}`, start: a, end: b, label: `${fmtNumber(a)}–${fmtNumber(b)}`, c: 0, isRange: true }) } nums.forEach(v => { const idx = Math.min(Math.floor((v - startEdge) / step), bins.length - 1); bins[idx].c += 1 }); while (bins.length && bins[0].c === 0) bins.shift(); while (bins.length && bins[bins.length - 1].c === 0) bins.pop(); return bins }
 
-function labelsLookLikeDates(labels){ if(!Array.isArray(labels)||labels.length===0) return false; let valid=0; const sample=labels.slice(0,Math.min(12,labels.length)); for(const lbl of sample){ const t=Date.parse(lbl); if(!isNaN(t)) valid++ } return valid>=Math.ceil(sample.length*0.6) }
+function labelsLookLikeDates(labels) { if (!Array.isArray(labels) || labels.length === 0) return false; let valid = 0; const sample = labels.slice(0, Math.min(12, labels.length)); for (const lbl of sample) { const t = Date.parse(lbl); if (!isNaN(t)) valid++ } return valid >= Math.ceil(sample.length * 0.6) }
 
-function buildPresetQuery(field,preset){ if(!preset||preset==='All') return ''; const map={'7D':'7d','30D':'30d','90D':'90d','1Y':'1y','YTD':'ytd'}; const date=map[preset]||String(preset).toLowerCase(); const params=new URLSearchParams(); params.set('date',date); if(field) params.set('field',field); const qs=params.toString(); return qs?`?${qs}`:'' }
+function buildPresetQuery(field, preset) { if (!preset || preset === 'All') return ''; const map = { '7D': '7d', '30D': '30d', '90D': '90d', '1Y': '1y', 'YTD': 'ytd' }; const date = map[preset] || String(preset).toLowerCase(); const params = new URLSearchParams(); params.set('date', date); if (field) params.set('field', field); const qs = params.toString(); return qs ? `?${qs}` : '' }
 
 // ---------- AutoSizeHighchart (debounced) + SmartChart (lazy) ----------
-function AutoSizeHighchart({ options, constructorType = 'chart', minHeight = 120 }) {
-  const containerRef = useRef(null)
-  const chartRef = useRef(null)
-  const rafId = useRef(0)
-  const lastW = useRef(0)
-  const lastH = useRef(0)
+const AutoSizeHighchart = React.memo(function AutoSizeHighchart({
+  options,
+  constructorType = "chart",
+  minHeight = 120,
+}) {
+  const containerRef = useRef(null);
+  const chartRef = useRef(null);
+  const lastOptionsRef = useRef(options);
+
+  // Only allow chart update when options reference truly changes
+  const allowUpdate = options !== lastOptionsRef.current;
+  useEffect(() => {
+    if (allowUpdate) lastOptionsRef.current = options;
+  }, [allowUpdate, options]);
 
   useEffect(() => {
-    if (!containerRef.current) return
-    const el = containerRef.current
-    const onResize = (entry) => {
-      if (!entry || !chartRef.current) return
-      const { width, height } = entry.contentRect
-      const w = Math.max(60, Math.floor(width))
-      const h = Math.max(minHeight, Math.floor(height))
-      if (Math.abs(w - lastW.current) < 4 && Math.abs(h - lastH.current) < 4) return
-      lastW.current = w; lastH.current = h
-      cancelAnimationFrame(rafId.current)
-      rafId.current = requestAnimationFrame(() => {
-        chartRef.current && chartRef.current.setSize(w, h, false)
-      })
-    }
-    const ro = new ResizeObserver((entries)=>onResize(entries[0]))
-    ro.observe(el)
-    return () => { cancelAnimationFrame(rafId.current); ro.disconnect() }
-  }, [minHeight])
-
-  const memoOpts = useMemo(() => ({ ...options, chart: { ...(options.chart || {}) } }), [options])
+    if (!containerRef.current || !chartRef.current) return;
+    const el = containerRef.current;
+    let rafId = 0;
+    const ro = new ResizeObserver(([entry]) => {
+      if (!entry || !chartRef.current) return;
+      const { width, height } = entry.contentRect;
+      const w = Math.max(60, Math.floor(width));
+      const h = Math.max(minHeight, Math.floor(height));
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        if (chartRef.current) chartRef.current.setSize(w, h, false);
+      });
+    });
+    ro.observe(el);
+    return () => {
+      cancelAnimationFrame(rafId);
+      ro.disconnect();
+    };
+  }, [minHeight]);
 
   return (
     <div ref={containerRef} className="w-full h-full overflow-hidden">
       <HighchartsReact
         highcharts={Highcharts}
-        options={memoOpts}
+        options={options}
         constructorType={constructorType}
-        callback={(chart)=>{ chartRef.current = chart }}
+        callback={(chart) => {
+          chartRef.current = chart;
+        }}
+        // Prevent HighchartsReact from updating unless we want it to
+        allowChartUpdate={allowUpdate}
+        immutable={false}
+        oneToOne={false}
       />
     </div>
-  )
-}
+  );
+}, shallowEqual);
 
 function SmartChart({ options, constructorType = 'chart', minHeight = 120 }) {
   const [visible, setVisible] = useState(false)
@@ -214,6 +257,29 @@ function SmartChart({ options, constructorType = 'chart', minHeight = 120 }) {
   )
 }
 
+// --- Pie/Doughnut performance helpers ---
+// Group long-tail pie/doughnut slices into "Other" while preserving animations
+function groupPieData(labels = [], values = [], {
+  maxSlices = 11,    // default: 10 + 1 Other
+  minPercent = 0.01, // group <1% into Other
+} = {}) {
+  const pairs = labels.map((name, i) => ({ name, y: Number(values[i]) || 0 }))
+  const total = pairs.reduce((s, p) => s + p.y, 0) || 1
+  const nonZero = pairs.filter(p => p.y > 0).sort((a, b) => b.y - a.y)
+
+  const main = []
+  let other = 0
+  for (let i = 0; i < nonZero.length; i++) {
+    const p = nonZero[i]
+    const pct = p.y / total
+    if (i < maxSlices - 1 && pct >= minPercent) main.push(p)
+    else other += p.y
+  }
+  if (other > 0) main.push({ name: "Other", y: other })
+  return { data: main, total }
+}
+
+
 // ---------- Build chart options (with perf tweaks) ----------
 function buildChartOptions(chart, colorOffset = 0, useStock = false) {
   const { chart_type, data: payload, chart_title, x_axis, y_axis } = chart
@@ -249,8 +315,8 @@ function buildChartOptions(chart, colorOffset = 0, useStock = false) {
     ...baseStockBits,
   }
 
-  const zoomXTypes = ['line','multi_line','area','areaspline','bar','multi_bar','column']
-  const zoomXYTypes = ['scatter','bubble']
+  const zoomXTypes = ['line', 'multi_line', 'area', 'areaspline', 'bar', 'multi_bar', 'column']
+  const zoomXYTypes = ['scatter', 'bubble']
   const isXYZoom = zoomXYTypes.includes(type)
   const isZoomable = zoomXTypes.includes(type) || isXYZoom
 
@@ -263,6 +329,42 @@ function buildChartOptions(chart, colorOffset = 0, useStock = false) {
       panKey: 'shift',
       resetZoomButton: { theme: { r: 6 } },
     }
+  }
+
+  function normalizeCol(s) {
+    return String(s || '')
+      .replace(/\s+/g, ' ')
+      .replace(/["'`]/g, '')
+      .replace(/\b(sum|avg|count|min|max)\s*\(|\)/gi, '') // strip simple agg wrappers
+      .trim()
+      .toLowerCase()
+  }
+
+  function findYSeriesIndices(chartData, colName) {
+    const data = chartData?.data || {}
+    const datasets = Array.isArray(data.datasets) ? data.datasets : []
+    const yRaw = chartData?.y_axis ?? data?.y_axis ?? chartData?.y_axis_title ?? ''
+    const yCols = Array.isArray(yRaw) ? yRaw : String(yRaw).split(',').map(s => s.trim()).filter(Boolean)
+
+    if (!colName) return []
+
+    const target = normalizeCol(colName)
+
+    // 1) exact match against y_axis list (by index)
+    const idxInY = yCols.findIndex(c => normalizeCol(c) === target)
+    if (idxInY !== -1 && idxInY < datasets.length) return [idxInY]
+
+    // 2) match against dataset labels (by name)
+    const labelMatches = []
+    datasets.forEach((ds, i) => {
+      const lab = normalizeCol(ds?.label)
+      if (lab && (lab === target || lab.includes(target))) labelMatches.push(i)
+    })
+    if (labelMatches.length) return labelMatches
+
+    // 3) fallback: if single series, use it; if multi, apply across all
+    if (datasets.length === 1) return [0]
+    return datasets.map((_, i) => i)
   }
 
   const makeSeries = () =>
@@ -313,19 +415,19 @@ function buildChartOptions(chart, colorOffset = 0, useStock = false) {
         return s
       }
 
-      if (['bar','multi_bar','column'].includes(type)) {
+      if (['bar', 'multi_bar', 'column'].includes(type)) {
         s.type = 'column'
         s.color = c
         s.borderColor = c
         s.borderWidth = 0
         s.animation = false
-      } else if (['line','multi_line'].includes(type)) {
+      } else if (['line', 'multi_line'].includes(type)) {
         s.type = 'line'
         s.color = c
         s.fillColor = transparentizeRgb(c)
         s.marker = { enabled: false }
         s.animation = false
-      } else if (['radar','area','areaspline','polar','polararea','polar-area'].includes(type)) {
+      } else if (['radar', 'area', 'areaspline', 'polar', 'polararea', 'polar-area'].includes(type)) {
         s.type = (type === 'areaspline') ? 'areaspline' : (type === 'area') ? 'area' : 'line'
         s.color = c
         s.marker = { enabled: false }
@@ -365,23 +467,34 @@ function buildChartOptions(chart, colorOffset = 0, useStock = false) {
     case 'doughnut': {
       const ds0 = datasets[0] || { data: [] }
       const values = ds0.data || []
-      const maxValue = values.length ? Math.max(...values.map(v => +v || 0)) : null
-      const maxIndex = maxValue !== null ? values.findIndex(v => +v === maxValue) : -1
+
+      // 🔑 group tail into "Other", keep top 10 slices
+      const { data: grouped } = groupPieData(labels, values, {
+        maxSlices: 11,    // 10 slices + 1 "Other"
+        minPercent: 0.0,  // or keep at 0.01 if you want <1% auto-grouped
+      })
+
+      const maxValue = grouped.length
+        ? Math.max(...grouped.map(v => v.y || 0)) : null
+      const maxIndex = maxValue !== null
+        ? grouped.findIndex(v => +v.y === maxValue) : -1
+
       base.chart.type = 'pie'
       base.series = [{
         name: ds0.label || 'Pie',
         innerSize: type === 'doughnut' ? '60%' : '0%',
-        data: labels.map((lbl, i) => ({
-          name: lbl,
-          y: Number(values[i]) || 0,
+        data: grouped.map((p, i) => ({
+          name: p.name,
+          y: p.y,
           color: OTHER_COLORS[i % OTHER_COLORS.length],
           sliced: i === maxIndex,
           selected: i === maxIndex,
         })),
-        animation: false,
       }]
       break
     }
+
+
 
     case 'worldmap': {
       const values = datasets?.[0]?.data || []
@@ -444,12 +557,173 @@ function normalizeRglLayout(baseWidgets) {
   })
 }
 
+const KpiCard = React.memo(function KpiCard({ name, value }) {
+  return (
+    <div className="bg-white p-6 flex flex-col items-center justify-center border border-gray-200 rounded-xl shadow-sm h-full">
+      <div className="text-xs tracking-wide font-medium text-gray-500 uppercase">
+        {name || "KPI"}
+      </div>
+      <div className="mt-1.5 text-3xl font-semibold text-gray-900">
+        {value ?? "—"}
+      </div>
+    </div>
+  );
+});
+
+const ChartCard = React.memo(function ChartCard({
+  widget,
+  colorIdx,
+  onEdit,
+  onDelete,
+  onFilter,
+  onMaximize,
+  onExplain,
+  isFetchingCharts,
+}) {
+  const [open, setOpen] = useState(false); // local menu state (prevents global re-render)
+
+  // build chart options only when widget.data changes
+  const { options, isStock, title, chartType } = useMemo(() => {
+    const t = String(widget?.data?.chart_type || "").toLowerCase();
+    const labels = Array.isArray(widget?.data?.data?.labels)
+      ? widget.data.data.labels
+      : [];
+    const isTs =
+      (t === "line" || t === "multi_line" || t === "area" || t === "areaspline") &&
+      labelsLookLikeDates(labels);
+
+    const o = buildChartOptions(
+      {
+        chart_type: widget?.data?.chart_type,
+        data: widget?.data,
+        x_axis: widget?.data?.x_axis,
+        y_axis: widget?.data?.y_axis,
+      },
+      colorIdx,
+      isTs
+    );
+
+    return {
+      options: o,
+      isStock: isTs,
+      title: widget?.data?.chart_title || "(No Title)",
+      chartType: t,
+    };
+  }, [widget?.data, colorIdx]);
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden h-full flex flex-col relative shadow-sm">
+      {/* Header */}
+      <div className="border-b flex items-center justify-between px-3 py-2.5 border-gray-200">
+        <div className="min-w-0 truncate text-sm font-medium text-gray-900">
+          {title}
+        </div>
+        <div className="relative" onClick={(e) => e.stopPropagation()}>
+          <button
+            onClick={() => setOpen((v) => !v)}
+            className="p-1.5 rounded-md hover:bg-gray-100 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+            title="More options"
+            aria-haspopup="menu"
+            aria-expanded={open}
+          >
+            <FiMoreVertical size={18} />
+          </button>
+          {open && (
+            <div
+              className="absolute right-0 top-full mt-2 w-48 bg-white border border-gray-200 rounded-xl shadow-lg z-[100] py-1 ring-1 ring-black/5"
+              role="menu"
+              aria-orientation="vertical"
+            >
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  onEdit?.(widget.id);
+                }}
+                className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                role="menuitem"
+              >
+                <FiEdit size={16} /> Edit
+              </button>
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  onDelete?.(widget.id);
+                }}
+                className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                role="menuitem"
+              >
+                <FiTrash2 size={16} /> Delete
+              </button>
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  onFilter?.();
+                }}
+                className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                role="menuitem"
+              >
+                <FiFilter size={16} /> Filters
+              </button>
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  onMaximize?.(widget);
+                }}
+                className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                role="menuitem"
+              >
+                <FiMaximize size={16} /> Maximize
+              </button>
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  onExplain?.(widget);
+                }}
+                className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                role="menuitem"
+              >
+                <RiRobot2Line size={16} /> Explain with AI
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Chart body */}
+      <div className="flex-1 min-h-0 p-2">
+        {isFetchingCharts ? (
+          <div className="h-full w-full grid place-items-center text-sm text-gray-500">
+            Refreshing…
+          </div>
+        ) : chartType === "grid" ? (
+          // reuse your existing grid renderer for 'grid' type
+          <div className="h-full">{/* grid table rendered by parent if needed */}</div>
+        ) : (
+          <AutoSizeHighchart
+            options={options}
+            constructorType={isStock ? "stockChart" : chartType === "worldmap" ? "mapChart" : "chart"}
+            minHeight={120}
+          />
+        )}
+      </div>
+    </div>
+  );
+}, (prev, next) => {
+  // Only re-render if the widget's data reference or fetching state changes
+  return (
+    prev.isFetchingCharts === next.isFetchingCharts &&
+    prev.widget?.data === next.widget?.data &&
+    prev.colorIdx === next.colorIdx
+  );
+});
+
+
 // ---------- main component ----------
 export default function ViewDashboard() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const id = searchParams.get('id')
-
+  const dashSchema = localStorage.getItem("db_schema")
   const token = localStorage.getItem('accessToken')
   const dbToken = localStorage.getItem('db_token')
 
@@ -536,24 +810,24 @@ export default function ViewDashboard() {
       setWidgets(normalizedWidgets.map(w => ({ ...w, data: null })))
       setLoading(false)
 
-      // 2) fetch datatypes async
-      ;(async () => {
-        try {
-          const schema = localStorage.getItem("db_schema")
-          if (!schema) { toast.error("Schema is missing. Delete this connection and create a new one."); return }
-          const payload = { db_token: dbToken, dataset_id: id, schema }
-          const dt = await fetchJSON(`${authUrl.BASE_URL}/dataset/dashboard/datatype/`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify(payload)
-          }, { timeoutMs: 20000, retries: 0 })
-          if (Array.isArray(dt?.data)) {
-            setFields(dt.data)
-            const firstNonDate = dt.data.find(f => categorizeColumnType(f.column_type) !== 'date')
-            setSelectedField(firstNonDate?.filtered_column_name || null)
-          }
-        } catch (e) { console.warn('datatype fetch failed', e) }
-      })()
+        // 2) fetch datatypes async
+        ; (async () => {
+          try {
+            const schema = localStorage.getItem("db_schema")
+            if (!schema) { toast.error("Schema is missing. Delete this connection and create a new one."); return }
+            const payload = { db_token: dbToken, dataset_id: id, schema }
+            const dt = await fetchJSON(`${authUrl.BASE_URL}/dataset/dashboard/datatype/`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+              body: JSON.stringify(payload)
+            }, { timeoutMs: 20000, retries: 0 })
+            if (Array.isArray(dt?.data)) {
+              setFields(dt.data)
+              const firstNonDate = dt.data.find(f => categorizeColumnType(f.column_type) !== 'date')
+              setSelectedField(firstNonDate?.filtered_column_name || null)
+            }
+          } catch (e) { console.warn('datatype fetch failed', e) }
+        })()
 
       // 3) stream widget data with concurrency + cache
       await pLimitAll(normalizedWidgets, 5, async (widget) => {
@@ -602,6 +876,47 @@ export default function ViewDashboard() {
 
   useEffect(() => { loadAll() }, [loadAll])
 
+  // --- name normalization & Y-series matching helpers ---
+  const normalizeColName = (s) =>
+    String(s || '')
+      .replace(/\s+/g, ' ')
+      .replace(/["'`]/g, '')
+      .replace(/\b(sum|avg|count|min|max)\s*\(|\)/gi, '') // strip simple agg wrappers
+      .trim()
+      .toLowerCase();
+
+  /**
+   * Return indices of datasets that correspond to the requested column.
+   * Matches against y_axis list and dataset labels (normalized).
+   * NO fallback (empty array means "no match") so filters don't silently do nothing.
+   */
+  function getYSeriesIndices(chartData, colName) {
+    const data = chartData?.data || {};
+    const datasets = Array.isArray(data.datasets) ? data.datasets : [];
+    const yRaw = chartData?.y_axis ?? data?.y_axis ?? chartData?.y_axis_title ?? '';
+    const yCols = Array.isArray(yRaw)
+      ? yRaw
+      : String(yRaw).split(',').map((s) => s.trim()).filter(Boolean);
+
+    const target = normalizeColName(colName);
+    if (!target) return [];
+
+    // 1) Exact match against y_axis entries (by index)
+    const yNorm = yCols.map(normalizeColName);
+    const hitIdx = [];
+    yNorm.forEach((c, i) => { if (c === target) hitIdx.push(i); });
+
+    // 2) Also allow dataset label matches
+    datasets.forEach((ds, i) => {
+      const lab = normalizeColName(ds?.label);
+      if (lab && (lab === target || lab.includes(target))) {
+        if (!hitIdx.includes(i)) hitIdx.push(i);
+      }
+    });
+
+    return hitIdx;
+  }
+
   // ---------- Date preset refetch ----------
   const refetchChartsForPreset = useCallback(async (field, preset) => {
     if (!widgets.length || !token || !dbToken) return
@@ -616,7 +931,11 @@ export default function ViewDashboard() {
             const json = await fetchJSON(endpoint, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-              body: JSON.stringify({ db_token: dbToken })
+              body: JSON.stringify({
+                db_token: dbToken,
+                "dataset_id": Number(id),
+                "schema": dashSchema
+              })
             }, { timeoutMs: 20000, retries: 0 })
             if (!json?.success) throw new Error('Failed')
             return { w, data: json.data }
@@ -645,8 +964,8 @@ export default function ViewDashboard() {
   const parseBooleanLoose = cell => {
     if (cell === true || cell === false) return cell
     const s = String(cell ?? '').trim().toLowerCase()
-    if (['true','t','1','yes','y'].includes(s)) return true
-    if (['false','f','0','no','n'].includes(s)) return false
+    if (['true', 't', '1', 'yes', 'y'].includes(s)) return true
+    if (['false', 'f', '0', 'no', 'n'].includes(s)) return false
     return null
   }
 
@@ -724,40 +1043,70 @@ export default function ViewDashboard() {
     }
   }
 
-  function applyFieldFilters(chartData, filters, mode = 'ALL') {
-    if (!filters?.length) return chartData
-    const content = chartData?.data || {}
-    const labels = Array.isArray(content.labels) ? content.labels : []
-    const datasets = Array.isArray(content.datasets) ? content.datasets : []
-    const xAxisCol = chartData?.x_axis || ''
-    const yAxisRaw = chartData?.y_axis || content?.y_axis || chartData?.y_axis_title || ''
-    const yCols = typeof yAxisRaw === 'string'
-      ? yAxisRaw.split(',').map(s => s.trim()).filter(Boolean)
-      : Array.isArray(yAxisRaw) ? yAxisRaw : []
+  function applyFieldFilters(chartData, filters, mode = "ALL") {
+    if (!filters?.length) return chartData;
 
-    if (!labels.length || !datasets.length) return chartData
+    const content = chartData?.data || {};
+    const labels = Array.isArray(content.labels) ? content.labels : [];
+    const datasets = Array.isArray(content.datasets) ? content.datasets : [];
+    const xAxisCol = chartData?.x_axis || "";
+    const xAxisNorm = normalizeColName(xAxisCol);
+
+    if (!labels.length || !datasets.length) return chartData;
 
     const keepMask = labels.map((_, rowIdx) => {
-      const results = filters.map(f => {
-        const t = inferType(f.column)
-        if (f.column === xAxisCol) {
-          const cell = labels[rowIdx]
-          return checkCondition({ cell, type: t, operator: f.operator, value: f.value, value2: f.value2, ranges: f.ranges })
-        }
-        const colIdx = yCols.findIndex(c => c === f.column)
-        if (colIdx !== -1) {
-          const cell = datasets[colIdx]?.data?.[rowIdx]
-          return checkCondition({ cell, type: t, operator: f.operator, value: f.value, value2: f.value2, ranges: f.ranges })
-        }
-        return true
-      })
-      return mode === 'ALL' ? results.every(Boolean) : results.some(Boolean)
-    })
+      const perFilter = filters.map((f) => {
+        const type = inferType(f.column);
+        const colNorm = normalizeColName(f.column);
 
-    const keptIdx = labels.map((_, i) => i).filter(i => keepMask[i])
-    const newLabels = keptIdx.map(i => labels[i])
-    const newDatasets = datasets.map(ds => ({ ...ds, data: keptIdx.map(i => ds.data?.[i]) }))
-    return { ...chartData, data: { ...chartData.data, labels: newLabels, datasets: newDatasets } }
+        // X-axis match (normalized)
+        if (colNorm && colNorm === xAxisNorm) {
+          const cell = labels[rowIdx];
+          return checkCondition({
+            cell,
+            type,
+            operator: f.operator,
+            value: f.value,
+            value2: f.value2,
+            ranges: f.ranges,
+          });
+        }
+
+        // Y-series match (by indices)
+        const yIdxList = getYSeriesIndices(chartData, f.column);
+        if (yIdxList.length > 0) {
+          // If multiple series match this field, treat filter as passing if ANY of them satisfies the condition.
+          return yIdxList.some((i) => {
+            const cell = datasets[i]?.data?.[rowIdx];
+            return checkCondition({
+              cell,
+              type,
+              operator: f.operator,
+              value: f.value,
+              value2: f.value2,
+              ranges: f.ranges,
+            });
+          });
+        }
+
+        // No match -> don’t kill the row for this filter
+        return true;
+      });
+
+      return mode === "ALL" ? perFilter.every(Boolean) : perFilter.some(Boolean);
+    });
+
+    const keptIdx = labels.map((_, i) => i).filter((i) => keepMask[i]);
+    const newLabels = keptIdx.map((i) => labels[i]);
+    const newDatasets = datasets.map((ds) => ({
+      ...ds,
+      data: keptIdx.map((i) => ds.data?.[i]),
+    }));
+
+    return {
+      ...chartData,
+      data: { ...chartData.data, labels: newLabels, datasets: newDatasets },
+    };
   }
 
   const applyAllFilters = chartOrKpi => {
@@ -770,44 +1119,77 @@ export default function ViewDashboard() {
   }
 
   function collectDistinctForColumn(widgets, colName) {
-    const m = new Map()
-    if (!colName) return m
+    const out = new Map();
+    if (!colName) return out;
+
+    const target = normalizeColName(colName);
+
     for (const w of widgets) {
-      if (w.type !== 'chart') continue
-      const cd = w.data
-      const labels = cd?.data?.labels || []
-      const ds = cd?.data?.datasets || []
-      const xAxis = cd?.x_axis
-      const yCols = (cd?.y_axis || '').toString().split(',').map(s => s.trim()).filter(Boolean)
-      if (xAxis && xAxis === colName && Array.isArray(labels)) {
-        for (const lbl of labels) { const key = lbl == null ? '' : String(lbl); m.set(key, (m.get(key) || 0) + 1) }
+      if (w.type !== 'chart') continue;
+      const cd = w.data;
+      if (!cd) continue;
+
+      const labels = cd?.data?.labels || [];
+      const ds = cd?.data?.datasets || [];
+      const xAxis = cd?.x_axis || '';
+      const xNorm = normalizeColName(xAxis);
+
+      // X-axis values
+      if (target && target === xNorm && Array.isArray(labels)) {
+        for (const lbl of labels) {
+          const key = lbl == null ? '' : String(lbl);
+          out.set(key, (out.get(key) || 0) + 1);
+        }
       }
-      const idx = yCols.indexOf(colName)
-      if (idx !== -1 && Array.isArray(ds?.[idx]?.data)) {
-        for (const v of ds[idx].data) { const key = v == null ? '' : String(v); m.set(key, (m.get(key) || 0) + 1) }
-      }
+
+      // Y-series values
+      const idxList = getYSeriesIndices(cd, colName);
+      idxList.forEach((i) => {
+        const arr = Array.isArray(ds?.[i]?.data) ? ds[i].data : [];
+        for (const v of arr) {
+          const key = v == null ? '' : String(v);
+          out.set(key, (out.get(key) || 0) + 1);
+        }
+      });
     }
-    return m
+    return out;
   }
+
   function collectNumericValues(widgets, colName) {
-    const out = []
-    if (!colName) return out
+    const out = [];
+    if (!colName) return out;
+
+    const target = normalizeColName(colName);
+
     for (const w of widgets) {
-      if (w.type !== 'chart') continue
-      const cd = w.data
-      const labels = cd?.data?.labels || []
-      const ds = cd?.data?.datasets || []
-      const xAxis = cd?.x_axis
-      const yCols = (cd?.y_axis || '').toString().split(',').map(s => s.trim()).filter(Boolean)
-      if (xAxis && xAxis === colName && Array.isArray(labels)) {
-        for (const lbl of labels) { const num = Number(lbl); if (isFinite(num)) out.push(num) }
+      if (w.type !== 'chart') continue;
+      const cd = w.data;
+      if (!cd) continue;
+
+      const labels = cd?.data?.labels || [];
+      const ds = cd?.data?.datasets || [];
+      const xAxis = cd?.x_axis || '';
+      const xNorm = normalizeColName(xAxis);
+
+      // Numeric x-axis labels
+      if (target && target === xNorm && Array.isArray(labels)) {
+        for (const lbl of labels) {
+          const num = Number(lbl);
+          if (isFinite(num)) out.push(num);
+        }
       }
-      const idx = yCols.indexOf(colName)
-      if (idx !== -1 && Array.isArray(ds?.[idx]?.data)) {
-        for (const v of ds[idx].data) { const num = Number(v); if (isFinite(num)) out.push(num) }
-      }
+
+      // Numeric y-series values
+      const idxList = getYSeriesIndices(cd, colName);
+      idxList.forEach((i) => {
+        const arr = Array.isArray(ds?.[i]?.data) ? ds[i].data : [];
+        for (const v of arr) {
+          const num = Number(v);
+          if (isFinite(num)) out.push(num);
+        }
+      });
     }
-    return out
+    return out;
   }
 
   const onLayoutChange = newLayout => {
@@ -993,7 +1375,7 @@ export default function ViewDashboard() {
     if (selectedType === 'number') {
       let bins = computeNumericBins(numericValues, 12)
       if (chipSearch) bins = bins.filter(b => b.label.toLowerCase().includes(chipSearch.toLowerCase()))
-      switch (sortBy) { case 'AZ': bins.sort((a,b)=>a.start-b.start); break; case 'ZA': bins.sort((a,b)=>b.start-a.start); break; case 'FREQ': bins.sort((a,b)=>b.c-a.c||a.start-b.start); break; case 'RARE': bins.sort((a,b)=>a.c-b.c||a.start-b.start); break }
+      switch (sortBy) { case 'AZ': bins.sort((a, b) => a.start - b.start); break; case 'ZA': bins.sort((a, b) => b.start - a.start); break; case 'FREQ': bins.sort((a, b) => b.c - a.c || a.start - b.start); break; case 'RARE': bins.sort((a, b) => a.c - b.c || a.start - b.start); break }
       return bins
     } else if (selectedType === 'boolean') {
       const tCount = (distinctMap.get('true') || distinctMap.get('True') || 0) + (distinctMap.get('1') || 0) + (distinctMap.get('yes') || distinctMap.get('Yes') || 0)
@@ -1003,7 +1385,7 @@ export default function ViewDashboard() {
     } else {
       let arr = Array.from(distinctMap.entries()).map(([v, c]) => ({ key: v, label: v, c, isRange: false }))
       if (chipSearch) arr = arr.filter(item => item.label.toLowerCase().includes(chipSearch.toLowerCase()))
-      switch (sortBy) { case 'AZ': arr.sort((a,b)=>a.label.localeCompare(b.label)); break; case 'ZA': arr.sort((a,b)=>b.label.localeCompare(a.label)); break; case 'FREQ': arr.sort((a,b)=>b.c-a.c||a.label.localeCompare(b.label)); break; case 'RARE': arr.sort((a,b)=>a.c-b.c||a.label.localeCompare(b.label)); break }
+      switch (sortBy) { case 'AZ': arr.sort((a, b) => a.label.localeCompare(b.label)); break; case 'ZA': arr.sort((a, b) => b.label.localeCompare(a.label)); break; case 'FREQ': arr.sort((a, b) => b.c - a.c || a.label.localeCompare(b.label)); break; case 'RARE': arr.sort((a, b) => a.c - b.c || a.label.localeCompare(b.label)); break }
       return arr
     }
   }, [selectedType, numericValues, distinctMap, chipSearch, sortBy])
@@ -1113,7 +1495,6 @@ export default function ViewDashboard() {
   const renderChart = (w, idx, forModal = false) => {
     if (!w?.data) return <div className="h-full w-full grid place-items-center"><div className="text-xs text-gray-400">Loading chart…</div></div>
     if (w?.data?.error) return <div className="h-full w-full grid place-items-center text-sm text-red-600">Failed to load</div>
-    if (w?.data?._empty) return <div className="h-full w-full grid place-items-center text-sm text-gray-500">No data</div>
 
     const t = String(w?.data?.chart_type || '').toLowerCase()
     if (t === 'grid') return renderGridTable(w)
@@ -1127,34 +1508,72 @@ export default function ViewDashboard() {
   }
 
   const filteredWidgets = useMemo(() => {
-    const mapped = widgets.map(w => w.type === 'chart' ? { ...w, data: applyAllFilters(w.data) } : w)
-    return mapped.filter(w => w.type === 'chart' ? chartHasData(w.data) || w?.data?._empty || w?.data?.error || w?.data===null : true)
+    const mapped = widgets.map(w =>
+      w.type === 'chart' ? { ...w, data: applyAllFilters(w.data) } : w
+    )
+    return mapped.filter(w => {
+      if (w.type !== 'chart') return true
+      if (w.data == null) return true            // keep placeholder while loading
+      if (w.data?.error) return true             // keep visible if it failed
+      return chartHasData(w.data)                // show only charts that have data
+    })
   }, [widgets, appliedFilters, matchMode])
 
+  // Replace your current addChipFilter with this version
   const addChipFilter = () => {
     if (!selectedField) return
+
     const t = selectedType
-    if (t === 'number' || (t === 'other' && NUM_OPS.includes(operator))) {
-      if (t === 'number' && selectedValues.size > 0) {
+    const isNumberish = t === 'number' || (t === 'other' && NUM_OPS.includes(operator))
+    const isTextish = t === 'text' || (t === 'other' && !NUM_OPS.includes(operator))
+    const hasChipSel = selectedValues.size > 0
+    const tyVal = (typedValue ?? '').trim()
+
+    // NUMBER (or "other" with numeric operator)
+    if (isNumberish) {
+      if (t === 'number' && hasChipSel) {
+        // Chip-selected numeric ranges -> in_ranges
         const chosenBins = chipItems.filter(it => selectedValues.has(it.key))
         if (chosenBins.length > 0) {
           const ranges = chosenBins.map(b => ({ start: b.start, end: b.end }))
           setAppliedFilters(fs => [...fs, { column: selectedField, operator: 'in_ranges', ranges }])
         }
-      } else if (typedValue !== '') {
-        const v = Number(typedValue)
-        if (!isNaN(v)) setAppliedFilters(fs => [...fs, { column: selectedField, operator, value: v }])
-      }
-    } else if (t === 'boolean') {
-      if (selectedValues.size > 0) {
-        const val = Array.from(selectedValues).join(', ')
-        setAppliedFilters(fs => [...fs, { column: selectedField, operator: 'in', value: val }])
-      } else if (typedValue) {
-        setAppliedFilters(fs => [...fs, { column: selectedField, operator, value: typedValue }])
+      } else if (tyVal !== '') {
+        // Typed numeric value with =, !=, >, <
+        const v = Number(tyVal)
+        if (!isNaN(v)) {
+          setAppliedFilters(fs => [...fs, { column: selectedField, operator, value: v }])
+        }
       }
     }
-    setSelectedValues(new Set()); setTypedValue('')
+    // BOOLEAN
+    else if (t === 'boolean') {
+      if (hasChipSel) {
+        // Chips true/false -> in
+        const val = Array.from(selectedValues).join(', ')
+        setAppliedFilters(fs => [...fs, { column: selectedField, operator: 'in', value: val }])
+      } else if (tyVal) {
+        // Typed "true"/"false" with = or != (or in/not_in)
+        setAppliedFilters(fs => [...fs, { column: selectedField, operator, value: tyVal }])
+      }
+    }
+    // TEXT (or "other" with text operator)
+    else if (isTextish) {
+      if (hasChipSel) {
+        // Multiple selected chips -> IN
+        const val = Array.from(selectedValues).join(', ')
+        setAppliedFilters(fs => [...fs, { column: selectedField, operator: 'in', value: val }])
+      } else if (tyVal) {
+        // Typed value with contains / not_contains / begins_with / ends_with / in / not_in / = / !=
+        setAppliedFilters(fs => [...fs, { column: selectedField, operator, value: tyVal }])
+      }
+    }
+
+    // reset selections / input after apply
+    setSelectedValues(new Set())
+    setTypedValue('')
   }
+
   const removeFilter = idx => setAppliedFilters(fs => fs.filter((_, i) => i !== idx))
   const handlePresetClick = async preset => { if (!rangeField && preset !== 'All') return; setRangePreset(preset); await refetchChartsForPreset(rangeField, preset) }
 
@@ -1167,7 +1586,7 @@ export default function ViewDashboard() {
 
   // ---------- render return continues in Part 3 ----------
 
-    // Loading + error gates
+  // Loading + error gates
   if (loading) {
     return (<><Navbar /><div className="mt-[55px] h-[calc(100vh-55px)] flex items-center justify-center text-gray-500">Loading dashboard…</div></>)
   }
@@ -1356,7 +1775,7 @@ export default function ViewDashboard() {
                   <option key={f.filtered_column_name} value={f.filtered_column_name}>{f.column_name}</option>
                 ))}
               </select>
-              {['7D','30D','90D','1Y','YTD','All'].map(p => {
+              {['7D', '30D', '90D', '1Y', 'YTD', 'All'].map(p => {
                 const selected = rangePreset === p
                 const disabled = !rangeField && p !== 'All'
                 return (
@@ -1377,70 +1796,50 @@ export default function ViewDashboard() {
         <div className="p-3 bg-gradient-to-b from-slate-50 to-slate-100">
           <GridLayout
             className="layout"
-            layout={filteredWidgets.map(w => ({ ...w.layout, i: w.key }))}
+            layout={filteredWidgets.map((w) => ({ ...w.layout, i: w.key }))}
             cols={COLS}
             rowHeight={ROW_HEIGHT}
             margin={[12, 12]}
             containerPadding={[12, 12]}
             isDraggable={isEditingLayout}
             isResizable={isEditingLayout}
-            onLayoutChange={onLayoutChange}
-            compactType={isEditingLayout ? 'vertical' : null}
-            preventCollision={!isEditingLayout}
+            onLayoutChange={(newLayout) => {
+              // Avoid state churn when not editing
+              if (!isEditingLayout) return;
+              setWidgets((prev) =>
+                prev.map((w) => {
+                  const l = newLayout.find((n) => n.i === w.key);
+                  return l ? { ...w, layout: { ...w.layout, ...l } } : w;
+                })
+              );
+            }}
+            compactType={isEditingLayout ? "vertical" : null}
+            preventCollision={isEditingLayout ? false : true}
             autoSize={true}
-            useCSSTransforms={true}
-            isDroppable={false}
           >
             {filteredWidgets.map((w, idx) => (
               <div key={w.key} data-grid={{ ...w.layout, i: w.key }} className="rounded-lg">
-                {w.type === 'chart' ? (
-                  <div className="bg-white rounded-xl border border-gray-200 overflow-hidden h-full flex flex-col relative shadow-sm">
-                    {/* Header */}
-                    <div className="border-b flex items-center justify-between px-3 py-2.5 border-gray-200">
-                      <div className="min-w-0 truncate text-sm font-medium text-gray-900">
-                        {w?.data?.chart_title || '(No Title)'}
-                      </div>
-                      <div className="relative" onClick={e => e.stopPropagation()}>
-                        <button onClick={() => toggleMenu(w.id)} className="p-1.5 rounded-md hover:bg-gray-100 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition" title="More options" aria-haspopup="menu" aria-expanded={menuOpenFor === w.id}>
-                          <FiMoreVertical size={18} />
-                        </button>
-                        {menuOpenFor === w.id && (
-                          <div className="absolute right-0 top-full mt-2 w-48 bg-white border border-gray-200 rounded-xl shadow-lg z-[100] py-1 ring-1 ring-black/5" role="menu" aria-orientation="vertical">
-                            <button onClick={() => handleEditChart(w.id)} className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2" role="menuitem">
-                              <FiEdit size={16} /> Edit
-                            </button>
-                            <button onClick={() => handleDeleteChart(w.id)} className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2" role="menuitem">
-                              <FiTrash2 size={16} /> Delete
-                            </button>
-                            <button onClick={handleFilterChart} className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2" role="menuitem">
-                              <FiFilter size={16} /> Filters
-                            </button>
-                            <button onClick={() => handleMaximizeChart(w)} className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2" role="menuitem">
-                              <FiMaximize size={16} /> Maximize
-                            </button>
-                            <button onClick={() => handleExplainChart(w)} className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2" role="menuitem">
-                              <RiRobot2Line size={16} /> Explain with AI
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Chart body */}
-                    <div className="flex-1 min-h-0 p-2">
-                      {isFetchingCharts ? (
-                        <div className="h-full w-full grid place-items-center text-sm text-gray-500">Refreshing…</div>
-                      ) : (
-                        renderChart(w, idx)
-                      )}
-                    </div>
-                  </div>
+                {w.type === "chart" ? (
+                  <ChartCard
+                    widget={w}
+                    colorIdx={idx}
+                    isFetchingCharts={isFetchingCharts}
+                    onEdit={handleEditChart}
+                    onDelete={handleDeleteChart}
+                    onFilter={handleFilterChart}
+                    onMaximize={handleMaximizeChart}
+                    onExplain={handleExplainChart}
+                  />
                 ) : (
-                  renderKpi(w)
+                  <KpiCard
+                    name={w?.data?.kpi_name}
+                    value={w?.data?.value ?? w?.data?.raw_value}
+                  />
                 )}
               </div>
             ))}
           </GridLayout>
+
         </div>
       </div>
 
@@ -1450,11 +1849,295 @@ export default function ViewDashboard() {
           <div className="bg-white w-[90vw] max-w-6xl h-[85vh] rounded-2xl shadow-2xl overflow-hidden relative" onClick={e => e.stopPropagation()}>
             <div className="h-12 px-4 border-b bg-white/90 backdrop-blur flex items-center justify-between">
               <div className="font-medium truncate pr-2">{modalChart?.data?.chart_title || 'Chart'}</div>
-              <button ref={closeBtnRef} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500" onClick={() => setModalOpen(false)} title="Close" aria-label="Close">
-                <FiX /> <span className="text-sm">Close</span>
+              <button ref={closeBtnRef} className="inline-flex items-center gap-2 px-1.5 py-1.5 rounded-md border hover:bg-gray-50 " onClick={() => setModalOpen(false)} title="Close" aria-label="Close">
+                <FiX />
               </button>
             </div>
             <div className="h-[calc(85vh-3rem)] p-3">{renderChart(modalChart, 0, true)}</div>
+          </div>
+        </div>
+      )}
+
+      {filterPanelOpen && (
+        <div
+          className="fixed inset-0 z-40 flex"
+          onClick={() => setFilterPanelOpen(false)}
+        >
+          <div
+            className="ml-[60px] mt-[55px] mb-4 w-[min(1120px,calc(100vw-80px))] h-[calc(100vh-75px)] bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="h-[56px] px-4 border-b bg-white/90 backdrop-blur flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="h-5 w-5 rounded bg-gray-200 grid place-items-center">
+                  <FiSettings className="text-gray-600" size={14} />
+                </div>
+                <div className="text-sm font-semibold text-gray-900">
+                  Global Filters
+                </div>
+              </div>
+              <button
+                className="p-2 rounded hover:bg-gray-100"
+                onClick={() => setFilterPanelOpen(false)}
+                aria-label="Close filters"
+              >
+                <FiX />
+              </button>
+            </div>
+
+            <div className="px-5 py-2 text-[12px] text-gray-500 border-b">
+              Build your filters by selecting the tags
+            </div>
+
+            <div className="h-[calc(100%-56px-34px-64px)] flex">
+              {/* Left list */}
+              <div className="w-[340px] border-r bg-gray-50/60 p-3 flex flex-col gap-3 overflow-y-auto">
+                <div className="relative">
+                  <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Search fields"
+                    value={fieldSearch}
+                    onChange={(e) => setFieldSearch(e.target.value)}
+                  />
+                </div>
+
+                {sectionMeta.map((sec) => {
+                  const items = groupedFields[sec.id];
+                  if (!items || items.length === 0) return null;
+                  return (
+                    <div key={sec.id} className="mt-1">
+                      <div className="flex items-center justify-between px-2 mb-2">
+                        <div className="text-[11px] uppercase tracking-wide text-gray-500">
+                          {sec.title}{" "}
+                          <span className="text-gray-400">
+                            · {items.length}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        {items.map((f) => (
+                          <button
+                            key={f.key}
+                            onClick={() => setSelectedField(f.key)}
+                            className={`w-full flex justify-between items-center px-3 py-2 rounded-xl border text-sm ${selectedField === f.key
+                              ? `bg-${sec.accent}-50 border-${sec.accent}-200`
+                              : "bg-white border-gray-200 hover:bg-gray-50"
+                              }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`h-3 w-1.5 rounded-full ${sec.dot}`}
+                              ></span>
+                              <span className="truncate">{f.name}</span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Right content */}
+              <div
+                className={`flex-1 overflow-hidden ${rightBgByType(
+                  selectedType
+                )}`}
+              >
+                {/* Toolbar */}
+                <div className="px-4 py-3 border-b flex items-center gap-3">
+                  <div className="text-sm font-medium text-gray-900 flex items-center gap-2">
+                    {selectedFieldMeta?.name || selectedField || "Field"}{" "}
+                    <FiSettings className="text-gray-400" />
+                  </div>
+
+                  <div className="ml-auto grid grid-cols-12 gap-2 w-full max-w-3xl">
+                    <div className="col-span-5 relative">
+                      <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <input
+                        className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="Search"
+                        value={chipSearch}
+                        onChange={(e) => setChipSearch(e.target.value)}
+                      />
+                    </div>
+
+                    <div className="col-span-3 relative">
+                      <select
+                        className="appearance-none w-full pl-3 pr-8 py-2 text-sm rounded-lg border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value)}
+                        title="Sort by"
+                      >
+                        <option value="AZ">
+                          Sort by:{" "}
+                          {selectedType === "number" ? "Low–High" : "A–Z"}
+                        </option>
+                        <option value="ZA">
+                          Sort by:{" "}
+                          {selectedType === "number" ? "High–Low" : "Z–A"}
+                        </option>
+                        <option value="FREQ">Sort by: Most frequent</option>
+                        <option value="RARE">Sort by: Least frequent</option>
+                      </select>
+                      <FiChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400" />
+                    </div>
+
+                    <div className="col-span-2 relative">
+                      <select
+                        className="appearance-none w-full pl-3 pr-8 py-2 text-sm rounded-lg border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        value={operator}
+                        onChange={(e) => setOperator(e.target.value)}
+                        title="Operator"
+                      >
+                        {(selectedType === "number"
+                          ? NUM_OPS
+                          : selectedType === "boolean"
+                            ? BOOL_OPS
+                            : selectedType === "other"
+                              ? [...TEXT_OPS, ...NUM_OPS]
+                              : TEXT_OPS
+                        ).map((op) => (
+                          <option key={op} value={op}>
+                            {prettyOp(op)}
+                          </option>
+                        ))}
+                      </select>
+                      <FiChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400" />
+                    </div>
+
+                    {selectedType !== "boolean" && (
+                      <div className="col-span-2">
+                        <input
+                          className="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder={
+                            selectedType === "number" ||
+                              (selectedType === "other" &&
+                                NUM_OPS.includes(operator))
+                              ? "Type a number"
+                              : operator === "in" || operator === "not_in"
+                                ? "Comma separated values"
+                                : "Type a value"
+                          }
+                          value={typedValue}
+                          onChange={(e) => setTypedValue(e.target.value)}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Chips area */}
+                <div className="p-4 overflow-auto h-[calc(100%-64px)]">
+                  <div className="flex flex-wrap gap-2">
+                    {chipItems.map((item) => {
+                      const active = selectedValues.has(item.key);
+                      return (
+                        <button
+                          key={item.key}
+                          onClick={() => {
+                            const next = new Set(selectedValues);
+                            if (next.has(item.key)) next.delete(item.key);
+                            else next.add(item.key);
+                            setSelectedValues(next);
+                          }}
+                          className={`px-3 py-1.5 rounded-xl text-sm border flex items-center gap-1 transition ${active
+                            ? "bg-blue-50 border-blue-400 shadow-sm"
+                            : "bg-white/80 border-gray-300 hover:bg-white"
+                            }`}
+                          title={item.label}
+                        >
+                          <span className="truncate max-w-[220px]">
+                            {item.label}
+                          </span>
+                          <span className="text-[11px] text-gray-500">
+                            {item.c || 0}
+                          </span>
+                        </button>
+                      );
+                    })}
+                    {chipItems.length === 0 && (
+                      <div className="text-sm text-gray-500">
+                        No values found for this field.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Sticky footer */}
+                  <div className="sticky bottom-0 w-full bg-white/95 backdrop-blur border-t px-4 py-3 flex items-center justify-between">
+                    <div className="text-[12px] text-gray-500">
+                      {selectedValues.size > 0
+                        ? `${selectedValues.size} selected`
+                        : "Select tags or type a value"}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        className="px-3 py-2 rounded-lg border text-sm bg-white hover:bg-gray-50"
+                        onClick={() => {
+                          setSelectedValues(new Set());
+                          setTypedValue("");
+                        }}
+                      >
+                        Reset
+                      </button>
+                      <button
+                        className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700"
+                        onClick={addChipFilter}
+                      >
+                        Apply
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="h-[64px] border-t px-4 flex items-center justify-between bg-white/90 backdrop-blur">
+              <div className="flex-1 flex flex-wrap gap-2 overflow-hidden">
+                {appliedFilters.map((f, i) => (
+                  <span
+                    key={`af-${i}`}
+                    className="inline-flex items-center gap-1 rounded-full bg-blue-50 text-blue-700 px-2 py-0.5 text-xs"
+                  >
+                    {f.column} {prettyOp(f.operator)}
+                    {f.operator === "in_ranges"
+                      ? ` ${f.ranges
+                        .map(
+                          (r) => `${fmtNumber(r.start)}–${fmtNumber(r.end)}`
+                        )
+                        .join(" or ")}`
+                      : ["is_empty", "is_not_empty"].includes(f.operator)
+                        ? ""
+                        : ` ${String(f.value ?? "")}`}
+                    <button
+                      className="hover:text-blue-900"
+                      onClick={() => removeFilter(i)}
+                      aria-label="Remove filter"
+                    >
+                      <FiX />
+                    </button>
+                  </span>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  className="px-3 py-1.5 rounded-md border text-sm hover:bg-gray-50"
+                  onClick={() => setAppliedFilters([])}
+                >
+                  Clear all
+                </button>
+                <button
+                  className="px-3 py-1.5 rounded-md bg-blue-600 text-white text-sm hover:bg-blue-700"
+                  onClick={() => setFilterPanelOpen(false)}
+                >
+                  Done
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -1486,7 +2169,7 @@ export default function ViewDashboard() {
                   {explainResponse.business_value?.length > 0 && (
                     <div>
                       <h3 className="font-semibold text-gray-900 mb-2">Business Value</h3>
-                      <ul className="space-y-1">{explainResponse.business_value.map((v,i)=>(
+                      <ul className="space-y-1">{explainResponse.business_value.map((v, i) => (
                         <li key={i} className="text-sm text-gray-700 flex items-start gap-2"><span className="text-green-600 mt-1">•</span><span>{v}</span></li>
                       ))}</ul>
                     </div>
@@ -1494,7 +2177,7 @@ export default function ViewDashboard() {
                   {explainResponse.suggestions?.length > 0 && (
                     <div>
                       <h3 className="font-semibold text-gray-900 mb-2">Suggestions</h3>
-                      <ul className="space-y-1">{explainResponse.suggestions.map((s,i)=>(
+                      <ul className="space-y-1">{explainResponse.suggestions.map((s, i) => (
                         <li key={i} className="text-sm text-gray-700 flex items-start gap-2"><span className="text-blue-600 mt-1">•</span><span>{s}</span></li>
                       ))}</ul>
                     </div>

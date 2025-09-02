@@ -71,6 +71,12 @@ function Home() {
   const resizerRef = useRef(null);
   // Add this ref to track tables state changes
   const tablesRef = useRef(tables);
+  const canvasRef = useRef(null);
+const bottomPaneRef = useRef(null);
+const rafIdRef = useRef(null);
+const dragHeightRef = useRef(null);
+
+
   useEffect(() => {
     tablesRef.current = tables;
   }, [tables]);
@@ -648,6 +654,7 @@ function Home() {
           sqlRef.current = json.sql || "";
           console.log("Generated SQL:", json.sql);
           setOpenModal("response");
+          setBottomHeight(400);
         } else {
           console.error("Preview generation failed:", json);
           toast.error("Failed to generate preview");
@@ -983,47 +990,8 @@ function Home() {
   }, [activePanel]);
 
   // Add this at the top of your Home component, after the imports
-  useEffect(() => {
-    // Enhanced ResizeObserver error suppression
-    const originalError = console.error;
-    const originalWarn = console.warn;
 
-    console.error = (...args) => {
-      if (
-        typeof args[0] === "string" &&
-        (args[0].includes("ResizeObserver loop completed") ||
-          args[0].includes("ResizeObserver loop limit exceeded"))
-      ) {
-        return; // Ignore ResizeObserver errors
-      }
-      originalError.apply(console, args);
-    };
 
-    console.warn = (...args) => {
-      if (typeof args[0] === "string" && args[0].includes("ResizeObserver")) {
-        return; // Ignore ResizeObserver warnings
-      }
-      originalWarn.apply(console, args);
-    };
-
-    // Add global error handler
-    const handleGlobalError = (event) => {
-      if (event.message && event.message.includes("ResizeObserver")) {
-        event.preventDefault();
-        event.stopPropagation();
-        return false;
-      }
-    };
-
-    window.addEventListener("error", handleGlobalError);
-
-    // Cleanup
-    return () => {
-      console.error = originalError;
-      console.warn = originalWarn;
-      window.removeEventListener("error", handleGlobalError);
-    };
-  }, []);
 
   // === Fetch tables ===
   useEffect(() => {
@@ -1057,23 +1025,24 @@ function Home() {
 
     setpageLoading(true);
 
+    const dbToken = localStorage.getItem("db_token");
     const token = localStorage.getItem("accessToken");
     apiFetch(`${authUrl.BASE_URL}/dataset/info/`, {
-      method: "GET",
-      headers:{
+      method: "POST",
+      headers: {
         Authorization: `Bearer ${token}`,
-      }
-      // body: JSON.stringify({ db_token: authCheck.dbToken }),
+      },
+      body: JSON.stringify({ db_token: dbToken }),
     })
       .then(({ res, json }) => {
         if (!res.ok) throw new Error(`Network error: ${res.status}`);
         const normalized = Array.isArray(json?.data)
-         ? json.data.map(d => ({
-             id: d.id,
-             name: d.name ?? d.dataset_name ?? "",   // support both old/new keys
-           }))
-         : [];
-       setDatasets(normalized);
+          ? json.data.map((d) => ({
+              id: d.id,
+              name: d.name ?? d.dataset_name ?? "", // support both old/new keys
+            }))
+          : [];
+        setDatasets(normalized);
       })
       .catch((err) => console.error("Error fetching datasets:", err))
       .finally(() => setpageLoading(false));
@@ -1094,22 +1063,43 @@ function Home() {
   }, [activePanel]);
 
   // Resizing bottom pane
-  useEffect(() => {
-    const handleMouseMove = (e) => {
-      if (!isResizing) return;
-      const newHeight = window.innerHeight - e.clientY;
-      setBottomHeight(Math.max(80, newHeight));
-    };
-    const handleMouseUp = () => {
-      if (isResizing) setIsResizing(false);
-    };
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [isResizing]);
+useEffect(() => {
+  const handleMouseMove = (e) => {
+    if (!isResizing) return;
+    const h = Math.max(80, window.innerHeight - e.clientY);
+    dragHeightRef.current = h;
+    if (rafIdRef.current) return;
+    rafIdRef.current = requestAnimationFrame(() => {
+      if (bottomPaneRef.current) {
+        bottomPaneRef.current.style.height = `${h - 10}px`;
+      }
+      if (canvasRef.current) {
+        canvasRef.current.style.height = `calc(100vh - (${h}px + 55px + 4px))`;
+      }
+      rafIdRef.current = null;
+    });
+  };
+
+  const handleMouseUp = () => {
+    if (isResizing) setIsResizing(false);
+    if (rafIdRef.current) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    if (dragHeightRef.current != null) {
+      setBottomHeight(dragHeightRef.current);
+      dragHeightRef.current = null;
+    }
+  };
+
+  window.addEventListener("mousemove", handleMouseMove, { passive: true });
+  window.addEventListener("mouseup", handleMouseUp);
+  return () => {
+    window.removeEventListener("mousemove", handleMouseMove);
+    window.removeEventListener("mouseup", handleMouseUp);
+  };
+}, [isResizing]);
+
 
   const handleMouseDown = () => setIsResizing(true);
 
@@ -1336,31 +1326,17 @@ function Home() {
 
   // Add a table node
   const addTable = (tableName) => {
-    if (selectedTables[tableName]) {
-      setActivePanel(null);
-      return;
-    }
-    const index = Object.keys(selectedTables).length;
-    const x = 100 + index * 300;
-    const y = 100 + index * 150;
-    const newSelected = {
-      ...selectedTables,
-      [tableName]: { columns: [], position: { x, y } },
-    };
-    // FIX: use functional update to avoid stale-closure overwrite
     setSelectedTables((prev) => {
-      if (prev[tableName]) return prev; // already added
+      if (prev[tableName]) return prev;
+
       const idx = Object.keys(prev).length;
       const pos = { x: 100 + idx * 300, y: 100 + idx * 150 };
-      return { ...prev, [tableName]: { columns: [], position: pos } };
+
+      const next = { ...prev, [tableName]: { columns: [], position: pos } };
+      selectedTablesRef.current = next;
+      return next;
     });
-    setNodes((nds) => [...nds, generateNode(tableName, x, y, [])]);
-    // Guard against duplicate node insertions (nodes are also rebuilt in useEffect)
-    setNodes((nds) =>
-      nds.some((n) => n.id === tableName)
-        ? nds
-        : [...nds, generateNode(tableName, x, y, [])]
-    );
+
     setActivePanel(null);
   };
 
@@ -1369,14 +1345,65 @@ function Home() {
     column,
     skipAutoLoad = false
   ) => {
-    // Skip auto-loading related tables during automation
-    if (!skipAutoLoad && column.relation) {
+    const wasSelected = selectedTablesRef.current[tableName]?.columns.includes(
+      column.name
+    );
+    toggleColumn(tableName, column);
+    if (!skipAutoLoad && column.relation && !wasSelected) {
       const related = column.relation.replace(/\./g, "_").toLowerCase();
-      if (!selectedTables[related]) {
-        await handleTableSelect(related);
+      const alreadyOnCanvas = Boolean(selectedTablesRef.current[related]);
+      if (!alreadyOnCanvas) {
+        try {
+          await handleTableSelect(related);
+        } catch (err) {
+          console.error(`Failed to load related table ${related}:`, err);
+          toggleColumn(tableName, column);
+        }
       }
     }
-    toggleColumn(tableName, column);
+  };
+
+  const removeTableCascade = (state, start) => {
+    const hasIncoming = (target, st) =>
+      Object.entries(st).some(([t, data]) => {
+        const table = tablesRef.current.find((x) => x.name === t);
+        if (!table) return false;
+        return data.columns.some((colName) => {
+          const colMeta = table.columns.find((c) => c.name === colName);
+          return (
+            colMeta?.relation &&
+            colMeta.relation.replace(/\./g, "_").toLowerCase() === target
+          );
+        });
+      });
+
+    const next = { ...state };
+    const stack = [start];
+
+    while (stack.length) {
+      const cur = stack.pop();
+      if (!next[cur]) continue;
+
+      const tableMeta = tablesRef.current.find((t) => t.name === cur);
+      const children = [];
+
+      if (tableMeta) {
+        next[cur].columns.forEach((colName) => {
+          const colMeta = tableMeta.columns.find((c) => c.name === colName);
+          if (colMeta?.relation) {
+            children.push(colMeta.relation.replace(/\./g, "_").toLowerCase());
+          }
+        });
+      }
+
+      delete next[cur];
+
+      children.forEach((child) => {
+        if (!hasIncoming(child, next)) stack.push(child);
+      });
+    }
+
+    return next;
   };
 
   // Toggle column selection (and auto-add related tables)
@@ -1390,7 +1417,7 @@ function Home() {
         ? entry.columns.filter((c) => c !== column.name)
         : [...entry.columns, column.name];
 
-      const updated = {
+      let updated = {
         ...prev,
         [tableName]: {
           ...entry,
@@ -1401,7 +1428,6 @@ function Home() {
       if (column.relation) {
         const normalized = column.relation.replace(/\./g, "_").toLowerCase();
         const relatedTable = tablesRef.current.find(
-          // Use tablesRef here too
           (t) => t.name.toLowerCase() === normalized
         )?.name;
 
@@ -1414,7 +1440,7 @@ function Home() {
             const stillReferenced = Object.entries(updated).some(
               ([tbl, data]) =>
                 data.columns.some((colName) => {
-                  const colMeta = tablesRef.current // Use tablesRef here too
+                  const colMeta = tablesRef.current
                     .find((t) => t.name === tbl)
                     ?.columns.find((c) => c.name === colName);
                   return (
@@ -1425,12 +1451,13 @@ function Home() {
                 })
             );
             if (!stillReferenced) {
-              delete updated[relatedTable];
+              updated = removeTableCascade(updated, relatedTable);
             }
           }
         }
       }
 
+      selectedTablesRef.current = updated;
       return updated;
     });
   };
@@ -1522,6 +1549,7 @@ function Home() {
     setSelectedDatasets(null);
     setSelectedIndex(null);
     setActivePanel(null);
+    setBottomHeight(100)
   };
 
   // Updated handleSubmit function with debugging and fixes
@@ -1616,6 +1644,7 @@ function Home() {
         setResponseData(previewData);
         setSql(json.sql || "");
         setOpenModal("response");
+          setBottomHeight(400);
 
         if (previewData.length > 0) {
           Swal.fire("Preview Generated", "success");
@@ -1939,7 +1968,7 @@ function Home() {
       } else {
         return (
           <div className="p-4 text-center">
-            <p className="text-gray-500 mb-2">No preview data available</p>
+            <p className="text-gray-500 mb-2">Generate a dataset, select one to preview, or click a table in the flow above to see its top 50 rows.</p>
             <p className="text-sm text-gray-400">
               {!responseData
                 ? "No data generated yet"
@@ -1947,12 +1976,7 @@ function Home() {
                 ? "Invalid data format received"
                 : "Empty dataset returned"}
             </p>
-            <button
-              onClick={() => console.log("Current responseData:", responseData)}
-              className="mt-2 px-3 py-1 text-xs bg-gray-200 rounded"
-            >
-              Debug: Log Response Data
-            </button>
+        
           </div>
         );
       }
@@ -2194,7 +2218,7 @@ function Home() {
               </div>
               <div className="p-2 overflow-y-auto flex-1 scrollsettings">
                 {activePanel === "tables" && (
-                  <div className="space-y-2">
+                  <div className="space-y-2 h-[500px] overflow-y-auto scrollsettings">
                     {tablesLoading ? (
                       <div className="space-y-3 animate-pulse">
                         {Array.from({ length: 6 }).map((_, i) => (
@@ -2591,6 +2615,7 @@ function Home() {
 
         {/* ReactFlow canvas */}
         <div
+         ref={canvasRef}
           style={{ height: `calc(100vh - (${bottomHeight}px + 55px))` }}
           className="ml-[60px]"
         >
@@ -2619,6 +2644,7 @@ function Home() {
 
         {/* Bottom pane */}
         <div
+         ref={bottomPaneRef}
           className="h-full w-[calc(100%-60px)] bg-white shadow-inner border-t overflow-scroll scrollsettings border-gray-200 ml-[60px]"
           style={{ height: `${bottomHeight - 10}px` }}
         >
