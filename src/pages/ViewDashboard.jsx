@@ -15,8 +15,8 @@ import { RxDragHandleDots2 } from "react-icons/rx"
 import {
   FiTrash2, FiSave, FiX, FiEdit, FiMoreVertical, FiFilter,
   FiMaximize, FiSearch, FiChevronDown, FiSettings,
-  FiTrendingUp, FiBarChart, FiPieChart, FiCode,
-  FiMessageSquare, FiSend,
+  FiTrendingUp, FiBarChart, 
+  FiMessageSquare, FiSend, FiTable
 } from "react-icons/fi"
 import { FaSort, FaSortUp, FaSortDown } from "react-icons/fa"
 import 'react-grid-layout/css/styles.css'
@@ -654,7 +654,7 @@ const ChartCard = React.memo(function ChartCard({
               >
                 <FiTrash2 size={16} /> Delete
               </button>
-              <button
+              {/* <button
                 onClick={() => {
                   setOpen(false);
                   onFilter?.();
@@ -663,7 +663,7 @@ const ChartCard = React.memo(function ChartCard({
                 role="menuitem"
               >
                 <FiFilter size={16} /> Filters
-              </button>
+              </button> */}
               <button
                 onClick={() => {
                   setOpen(false);
@@ -801,7 +801,7 @@ export default function ViewDashboard() {
 
       if (!layoutJson?.success) throw new Error(layoutJson?.message || 'Failed to load dashboard')
       if (layoutJson.dataset_name) setSecureDatasetName(layoutJson.dataset_name)
-      setDashboardName(layoutJson.name || `Dashboard #${id}`)
+      setDashboardName(layoutJson.name || `Dashboard`)
 
       const baseWidgets = Array.isArray(layoutJson.widgets) ? layoutJson.widgets : []
       const normalizedWidgets = normalizeRglLayout(baseWidgets)
@@ -858,7 +858,7 @@ export default function ViewDashboard() {
             }
           }
 
-          writeCache(id, widget.id, dbToken, payload)
+          // writeCache(id, widget.id, dbToken, payload)
           setWidgets(prev => prev.map(w => (w.key === widget.key ? { ...w, data: payload } : w)))
         } catch (err) {
           console.error(`Widget ${widget.id} error:`, err)
@@ -1043,6 +1043,487 @@ export default function ViewDashboard() {
     }
   }
 
+   const changeDataset = (id) => {
+    navigate(`/gallery?datasetId=${id}`);
+    selectDataset(id);
+  };
+  // Auto-scroll to bottom of chat messages
+  const scrollToBottom = () => {
+    chatMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  // Enhanced AI Message Component
+  const renderAIMessage = (message) => {
+    const ai = message.aiResponse || {};
+    const { intent, data } = ai;
+
+    // ✅ Read confidence from either place and normalize to a number
+    const rawConf =
+      ai.confidence !== undefined
+        ? ai.confidence
+        : data?.confidence !== undefined
+        ? data.confidence
+        : undefined;
+
+    const conf = typeof rawConf === "string" ? parseFloat(rawConf) : rawConf;
+    scrollToBottom();
+    const note =
+      conf !== undefined && !Number.isNaN(conf) && conf < 0.5 ? (
+        <div className="mt-2 text-xs text-yellow-700 italic bg-yellow-50 border border-yellow-200 rounded p-2">
+          ⚠️ Note: the response I have given may be less accurate. The AI
+          chatbot is still in development stage.
+        </div>
+      ) : null;
+
+    switch (intent) {
+      case "greeting":
+        return (
+          <div className="space-y-2">
+            <div className="flex items-center space-x-2">
+              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+              <span className="text-sm font-medium text-gray-700">
+                Greeting
+              </span>
+            </div>
+            <p className="text-sm text-gray-700">{data?.response}</p>
+          </div>
+        );
+
+      case "analyze_chart":
+        return (
+          <div className="space-y-3">
+            <div className="flex items-center space-x-2">
+              <FiBarChart className="text-blue-500" size={16} />
+              <span className="text-sm font-medium text-gray-700">
+                Chart Analysis
+              </span>
+            </div>
+            <div className="bg-blue-50 rounded-lg p-3 space-y-2">
+              <p className="text-sm text-gray-700">{data?.response}</p>
+              <div className="text-xs text-gray-700">
+                <div>Total: {data?.data_insights?.total}</div>
+                <div>Top Labels:</div>
+                <ul className="list-disc ml-4">
+                  {(data?.data_insights?.top_labels || [])
+                    .slice(0, 3)
+                    .map((t, i) => (
+                      <li key={i}>
+                        {t.label}: {t.value} ({t.percent}%)
+                      </li>
+                    ))}
+                </ul>
+                <div>Long tail: {data?.data_insights?.long_tail_count}</div>
+                <div>
+                  Top-1 concentration: {data?.data_insights?.concentration_top1}
+                  %
+                </div>
+              </div>
+              {Array.isArray(data?.suggestions) &&
+                data.suggestions.length > 0 && (
+                  <div className="space-y-1">
+                    <div className="text-xs font-medium text-gray-600">
+                      Suggestions:
+                    </div>
+                    {data.suggestions.map((s, idx) => (
+                      <div
+                        key={idx}
+                        className="text-xs text-gray-600 flex items-start space-x-1"
+                      >
+                        <span className="text-blue-500 mt-0.5">•</span>
+                        <span>{s}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+            </div>
+            {note}
+          </div>
+        );
+
+      case "analyze_kpi":
+        return (
+          <div className="space-y-3">
+            <div className="flex items-center space-x-2">
+              <FiTrendingUp className="text-green-500" size={16} />
+              <span className="text-sm font-medium text-gray-700">
+                KPI Analysis
+              </span>
+            </div>
+
+            <div className="bg-green-50 rounded-lg p-3 space-y-2">
+              <p className="text-sm text-gray-700">{data?.response}</p>
+
+              {data?.sql_suggestion && (
+                <div className="bg-gray-100 rounded p-2 text-xs font-mono text-gray-600">
+                  {data.sql_suggestion}
+                </div>
+              )}
+            </div>
+
+            {data?.suggestions && data.suggestions.length > 0 && (
+              <div className="space-y-1">
+                <div className="text-xs font-medium text-gray-600">
+                  Recommendations:
+                </div>
+                {data.suggestions.map((suggestion, idx) => (
+                  <div
+                    key={idx}
+                    className="text-xs text-gray-600 flex items-start space-x-1"
+                  >
+                    <span className="text-green-500 mt-0.5">•</span>
+                    <span>{suggestion}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+
+      case "create_kpi":
+        return (
+          <div className="space-y-3">
+            <div className="flex items-center space-x-2">
+              <FiTrendingUp className="text-purple-500" size={16} />
+              <span className="text-sm font-medium text-gray-700">
+                KPI Creation
+              </span>
+            </div>
+
+            <div className="bg-purple-50 rounded-lg p-3 space-y-2">
+              <div className="text-sm font-medium text-gray-800">
+                {data?.kpi_name}
+              </div>
+              <p className="text-sm text-gray-700">{data?.expression}</p>
+
+              {data?.sql_query && (
+                <div className="bg-gray-100 rounded p-2 text-xs font-mono text-gray-600">
+                  {data.sql_query}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-2">
+              <div className="text-xs text-yellow-800">
+                🚀 We're adding automatic KPI creation to your dashboard soon!
+              </div>
+            </div>
+          </div>
+        );
+
+      case "create_chart":
+        return (
+          <div className="space-y-3">
+            <div className="flex items-center space-x-2">
+              <FiBarChart className="text-indigo-500" size={16} />
+              <span className="text-sm font-medium text-gray-700">
+                Chart Proposal
+              </span>
+            </div>
+            <div className="bg-indigo-50 rounded-lg p-3 space-y-2">
+              <div className="text-sm font-medium text-gray-800">
+                Chart title: {data?.chart_title}
+              </div>
+              <div className="flex items-center space-x-2">
+                <span className="text-xs bg-indigo-200 text-indigo-800 px-2 py-1 rounded">
+                  {(data?.chart_type || "").toUpperCase()}
+                </span>
+              </div>
+              <div className="text-sm text-gray-700">
+                <div>
+                  <strong>X-Axis:</strong> {data?.x_axis}
+                </div>
+                <div>
+                  <strong>Y-Axis:</strong> {data?.y_axis}
+                </div>
+              </div>
+            </div>
+            <div className="flex space-x-2">
+              <button
+                onClick={() => handleCreateChart(data)}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium"
+              >
+                Add Chart
+              </button>
+            </div>
+          </div>
+        );
+      case "table_query":
+        return (
+          <div className="space-y-3">
+            <div className="flex items-center space-x-2">
+              <FiTable className="text-teal-500" size={16} />
+              <span className="text-sm font-medium text-gray-700">
+                Table Query
+              </span>
+            </div>
+            <div className="bg-teal-50 rounded-lg p-3 space-y-2">
+              <p className="text-sm text-gray-700">{data?.response}</p>
+              {data?.sql_suggestion && (
+                <div className="bg-gray-100 rounded p-2 text-xs font-mono text-gray-600">
+                  {data.sql_suggestion}
+                </div>
+              )}
+            </div>
+            {note}
+          </div>
+        );
+
+      case "other":
+        return (
+          <div className="space-y-2">
+            <div className="flex items-center space-x-2">
+              <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
+              <span className="text-sm font-medium text-gray-700">
+                General Query
+              </span>
+            </div>
+            <p className="text-sm text-gray-700">{data?.response}</p>
+            <div className="text-xs text-gray-500 italic">
+              For data-related questions, try asking about your charts or KPIs!
+            </div>
+          </div>
+        );
+
+      default:
+        return <p className="text-sm text-gray-700">{message.text}</p>;
+    }
+  };
+
+  // Delete a dataset
+  const handleDeleteDataset = async (ds, e) => {
+    e.stopPropagation();
+    const { isConfirmed } = await Swal.fire({
+      title: `Delete dataset “${ds.name}”?`,
+      text: "This will remove all its charts permanently.",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "#d33",
+      cancelButtonColor: "#3085d6",
+      confirmButtonText: "Yes, delete it!",
+    });
+    if (!isConfirmed) return;
+    const token = localStorage.getItem("accessToken");
+    if (!token) {
+      toast.error("Auth Error: No access token found.");
+      return;
+    }
+    const dbToken = localStorage.getItem("db_token");
+    if (!dbToken) {
+      toast.error("Auth Error: No DB token found.");
+      return;
+    }
+    try {
+      const res = await fetch(`${authUrl.BASE_URL}/dataset/delete/${ds.id}`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!res.ok) throw new Error("Delete failed");
+      setDatasets((prev) => prev.filter((d) => d.id !== ds.id));
+      if (selectedId === ds.id) {
+        setSelectedId(null);
+        setCharts([]);
+        setKpis([]);
+      }
+      Swal.fire("Deleted!", "Your dataset has been removed.", "success");
+    } catch (err) {
+      console.error(err);
+      Swal.fire("Error", "Unable to delete dataset.", "error");
+    }
+  };
+
+  const handleSuggestionClick = (suggestion) => {
+    const inputElement = document.getElementById("aiInput");
+    inputElement.value = suggestion;
+    handleSendMessage();
+  };
+
+  const checkState = (input) => {
+    // console.log("chatinput", chatInput);
+    console.log(`input`, input);
+  };
+  const selectDataset = async (id) => {
+    setSelectedId(id);
+    setActivePanel(null);
+    setCharts([]);
+    setKpis([]);
+    setLoadingDetails(true);
+    const ds = datasets.find((d) => String(d.id) === String(id));
+    const datasetName = ds?.dataset_name || ds?.name || "";
+    setSelectedName(datasetName);
+    selectedNameRef.current = datasetName; // Add this line
+
+    const token = localStorage.getItem("accessToken");
+    if (!token) {
+      toast.error("Auth Error: No access token found.");
+      return;
+    }
+    const dbToken = localStorage.getItem("db_token");
+    if (!dbToken) {
+      toast.error("Auth Error: No DB token found.");
+      return;
+    }
+
+    try {
+      // 1) Fetch KPIs and Charts data
+      const [kpisRes, chartsRes] = await Promise.all([
+        fetch(`${authUrl.BASE_URL}/dataset/kpis/${id}/`, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+        fetch(`${authUrl.BASE_URL}/dataset/chart/${id}/`, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+      ]);
+
+      if (!kpisRes.ok || !chartsRes.ok) {
+        throw new Error(`Failed to load data for dataset ${id}`);
+      }
+
+      const kpisData = await kpisRes.json();
+      const chartsData = await chartsRes.json();
+
+      console.log("Raw KPIs data:", kpisData); // Debug log
+      console.log("Raw Charts data:", chartsData); // Debug log
+
+      // Extract KPI metadata from the new schema
+      const kpiList = kpisData?.data?.kpi || [];
+
+      // Now fetch the actual KPI values using individual API calls
+      const kpiValuePromises = kpiList.map(async (kpi) => {
+        try {
+          const response = await fetch(
+            `${authUrl.BASE_URL}/dataset/kpi/${kpi.id}/data/`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ db_token: dbToken }),
+            }
+          );
+
+          if (response.ok) {
+            const result = await response.json();
+            console.log(`KPI ${kpi.id} result:`, result); // Debug log
+
+            return {
+              kpi_id: kpi.id,
+              kpi_name: result?.data?.kpi_name || kpi.kpi_name,
+              value: result?.data?.value || result?.data?.raw_value || "N/A",
+            };
+          } else {
+            console.error(
+              `Failed to fetch KPI ${kpi.id} data:`,
+              response.status
+            );
+          }
+        } catch (err) {
+          console.error(`Error fetching KPI ${kpi.id}:`, err);
+        }
+
+        // Fallback if API call fails
+        return {
+          kpi_id: kpi.id,
+          kpi_name: kpi.kpi_name,
+          value: "Error",
+        };
+      });
+
+      // Wait for all KPI value requests to complete
+      const kpiResults = await Promise.allSettled(kpiValuePromises);
+
+      // Extract successful KPI results
+      const transformedKpis = kpiResults
+        .filter((r) => r.status === "fulfilled" && r.value)
+        .map((r) => r.value);
+
+      // Extract chart metadata from the new schema
+      const chartList = chartsData?.data?.chart || [];
+
+      // Now fetch the actual chart data using individual API calls
+      const chartValuePromises = chartList.map(async (chart) => {
+        try {
+          const response = await fetch(
+            `${authUrl.BASE_URL}/dataset/chart/${chart.id}/data/`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ db_token: dbToken }),
+            }
+          );
+
+          if (response.ok) {
+            const result = await response.json();
+            console.log(`Chart ${chart.id} result:`, result); // Debug log
+
+            // Transform the response to match the expected format
+            return {
+              chart_id: result?.data?.chart_id || chart.id,
+              chart_title: result?.data?.chart_title || chart.chart_title,
+              chart_type: result?.data?.chart_type || chart.chart_type,
+              x_axis: result?.data?.x_axis || chart.x_axis,
+              y_axis: result?.data?.y_axis || chart.y_axis,
+              data: result?.data?.data || null, // This contains labels and datasets
+            };
+          } else {
+            console.error(
+              `Failed to fetch chart ${chart.id} data:`,
+              response.status
+            );
+          }
+        } catch (err) {
+          console.error(`Error fetching chart ${chart.id}:`, err);
+        }
+        return null;
+      });
+
+      // Wait for all chart data requests to complete
+      const chartResults = await Promise.allSettled(chartValuePromises);
+
+      // Extract successful chart results and filter out heatmaps
+      const finalCharts = chartResults
+        .filter(
+          (r) =>
+            r.status === "fulfilled" &&
+            r.value &&
+            r.value.chart_type !== "heatmap"
+        )
+        .map((r) => r.value);
+
+      // Update state
+      setKpis(transformedKpis);
+      setCharts(finalCharts);
+
+      console.log("Final KPIs:", transformedKpis); // Debug log
+      console.log("Final Charts:", finalCharts); // Debug log
+    } catch (err) {
+      console.error("Error in selectDataset:", err);
+      Swal.fire("Error", "Could not load dataset details", "error");
+    } finally {
+      setLoadingDetails(false);
+    }
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
+    }
+  };
   function applyFieldFilters(chartData, filters, mode = "ALL") {
     if (!filters?.length) return chartData;
 
@@ -1363,8 +1844,7 @@ export default function ViewDashboard() {
       toast.error(`Failed to create chart: ${error.message}`)
     }
   }
-  const handleSuggestionClick = (s) => { const input = document.getElementById("aiInput"); input.value = s; handleSendMessage() }
-  const handleKeyPress = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendMessage() } }
+
 
   // Chips/fields derived state
   const selectedType = useMemo(() => (selectedField ? inferType(selectedField) : 'text'), [selectedField, inferType])
@@ -1665,96 +2145,226 @@ export default function ViewDashboard() {
         )}
       </aside>
 
-      {/* Slide-over panel (chatbot) */}
       {activePanel && (
-        <div className="fixed w-[320px] left-[70px] h-[500px] z-30 top-[60px] rounded-lg overflow-hidden drop-shadow-xl flex bg-black bg-opacity-25" onClick={() => setActivePanel(null)}>
-          <div className="bg-white border border-gray-200 text-gray-600 w-full max-h-[500px] overflow-y-auto scrollsettings rounded-lg" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="fixed w-[320px] left-[70px] h-[500px] z-30 top-[60px] rounded-lg overflow-hidden drop-shadow-xl flex bg-black bg-opacity-25"
+          onClick={() => setActivePanel(null)}
+        >
+          <div
+            className="bg-white border border-gray-200 text-gray-600 w-full max-h-[500px] overflow-y-auto scrollsettings rounded-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
             {/* Header */}
             <div className="flex items-center justify-between p-4 border-b border-gray-200">
               <p className="text-lg font-medium text-gray-800">
+                {activePanel === "dataset" && "Datasets"}
                 {activePanel === "chatbot" && (
-                  <div className="flex items-center space-x-2">
-                    <div className="w-6 h-6 bg-gray-200 rounded-full flex items-center justify-center">
-                      <FiMessageSquare className="text-gray-600 text-xs" />
+                  <>
+                    {" "}
+                    <div className="flex items-center space-x-2">
+                      <div className="w-6 h-6 bg-gray-200 rounded-full flex items-center justify-center">
+                        <FiMessageSquare className="text-gray-600 text-xs" />
+                      </div>
+                      <span className="text-md font-medium text-gray-600">
+                        AI Assistant
+                      </span>
                     </div>
-                    <span className="text-md font-medium text-gray-600">AI Assistant</span>
-                  </div>
+                  </>
                 )}
               </p>
-              <button onClick={() => setActivePanel(null)} className="p-1 rounded hover:bg-gray-200" title="Close">
+              <button
+                onClick={() => setActivePanel(null)}
+                className="p-1 rounded hover:bg-gray-200"
+                title="Close"
+              >
                 <FiX size={20} />
               </button>
             </div>
-
-            {/* Chat content */}
+            {/* Content list */}
             <div className="p-2">
-              <div className="flex flex-col h-full">
-                {showSuggestions && chatMessages.length === 0 && (
-                  <div className="p-4 space-y-4">
-                    <div className="space-y-3 text-sm text-gray-600 leading-relaxed">
-                      <p>Ask me anything about your data, charts, or KPIs to get started!</p>
-                    </div>
-
+              {activePanel === "dataset" && (
+                <div className="space-y-2">
+                  {loadingDatasets ? (
                     <div className="space-y-2">
-                      <button onClick={() => handleSuggestionClick("Can you explain me the charts in my dataset?")} className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors">
-                        <span className="text-sm text-gray-700">Can you explain me the charts in my dataset?</span>
-                      </button>
-                      <button onClick={() => handleSuggestionClick("Please generate a chart for me.")} className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors">
-                        <span className="text-sm text-gray-700">Please generate a chart for me.</span>
-                      </button>
-                      <button onClick={() => handleSuggestionClick("How do I add more data to my dataset?")} className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors">
-                        <span className="text-sm text-gray-700">How do I add more data to my dataset?</span>
-                      </button>
+                      {Array.from({ length: 10 }).map((_, i) => (
+                        <div
+                          key={i}
+                          className="h-5 bg-gray-200 rounded animate-pulse"
+                        />
+                      ))}
                     </div>
-                  </div>
-                )}
+                  ) : (
+                    datasets.map((ds) => (
+                      <div
+                        key={ds.id}
+                        onClick={() => changeDataset(ds.id)}
+                        className={`px-2 py-2 cursor-pointer flex justify-between items-center rounded hover:bg-gray-100 ${
+                          selectedId === ds.id
+                            ? "bg-gray-100 text-gray-800"
+                            : "text-gray-800"
+                        }`}
+                      >
+                        <span className="truncate">{ds.name}</span>
+                        <button
+                          onClick={(e) => handleDeleteDataset(ds, e)}
+                          className="p-1 hover:text-red-500"
+                          title={`Delete ${ds.name}`}
+                        >
+                          <FiTrash2 size={16} />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+              {activePanel === "chatbot" && (
+                <div className="flex flex-col h-full">
+                  {/* Welcome Message and Suggestions */}
+                  {showSuggestions && chatMessages.length === 0 && (
+                    <div className="p-4 space-y-4">
+                      {/* Welcome Section */}
+                      <div className="space-y-3">
+                        <div className="space-y-3 text-sm text-gray-600 leading-relaxed">
+                          <p>
+                            Ask me anything about your data, charts, or KPIs to
+                            get started!
+                          </p>
+                        </div>
+                      </div>
 
-                {chatMessages.length > 0 && (
-                  <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-[200px] max-h-[300px]">
-                    {chatMessages.map((message) => (
-                      <div key={message.id} className={`flex ${message.isUser ? "justify-end" : "items-start space-x-2"}`}>
-                        {!message.isUser && (
+                      {/* Suggestion Buttons */}
+                      <div className="space-y-2">
+                        <button
+                          onClick={() =>
+                            handleSuggestionClick(
+                              "Can you explain me the charts in my dataset?"
+                            )
+                          }
+                          className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors"
+                        >
+                          <span className="text-sm text-gray-700">
+                            Can you explain me the charts in my dataset?
+                          </span>
+                        </button>
+
+                        <button
+                          onClick={() =>
+                            handleSuggestionClick(
+                              "Please generate a chart for me."
+                            )
+                          }
+                          className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors"
+                        >
+                          <span className="text-sm text-gray-700">
+                            Please generate a chart for me.
+                          </span>
+                        </button>
+
+                        <button
+                          onClick={() =>
+                            handleSuggestionClick(
+                              "How do I add more data to my dataset?"
+                            )
+                          }
+                          className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors"
+                        >
+                          <span className="text-sm text-gray-700">
+                            How do I add more data to my dataset?
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Chat Messages */}
+                  {chatMessages.length > 0 && (
+                    <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-[200px] max-h-[300px]">
+                      {chatMessages.map((message) => (
+                        <div
+                          key={message.id}
+                          className={`flex ${
+                            message.isUser
+                              ? "justify-end"
+                              : "items-start space-x-2"
+                          }`}
+                        >
+                          {!message.isUser && (
+                            <div className="w-6 h-6 bg-gray-200 rounded-full flex items-center justify-center flex-shrink-0 mt-1">
+                              <FiMessageSquare className="text-gray-600 text-xs" />
+                            </div>
+                          )}
+                          <div
+                            className={`rounded-xl p-3 max-w-[85%] text-sm ${
+                              message.isUser
+                                ? "bg-gray-700 text-white"
+                                : "bg-gray-50 text-gray-700 border border-gray-200"
+                            }`}
+                          >
+                            {message.isUser ? (
+                              <p className="leading-relaxed">{message.text}</p>
+                            ) : (
+                              renderAIMessage(message)
+                            )}
+                          </div>
+                        </div>
+                      ))}
+
+                      {/* Typing Indicator */}
+                      {isTyping && (
+                        <div className="flex items-start space-x-2">
                           <div className="w-6 h-6 bg-gray-200 rounded-full flex items-center justify-center flex-shrink-0 mt-1">
                             <FiMessageSquare className="text-gray-600 text-xs" />
                           </div>
-                        )}
-                        <div className={`rounded-xl p-3 max-w-[85%] text-sm ${message.isUser ? "bg-gray-700 text-white" : "bg-gray-50 text-gray-700 border border-gray-200"}`}>
-                          {message.isUser ? <p className="leading-relaxed">{message.text}</p> : <p className="leading-relaxed">{message.text}</p>}
-                        </div>
-                      </div>
-                    ))}
-                    {isTyping && (
-                      <div className="flex items-start space-x-2">
-                        <div className="w-6 h-6 bg-gray-200 rounded-full flex items-center justify-center flex-shrink-0 mt-1">
-                          <FiMessageSquare className="text-gray-600 text-xs" />
-                        </div>
-                        <div className="bg-gray-50 rounded-xl border border-gray-200 p-3">
-                          <div className="flex items-center space-x-2">
-                            <div className="flex space-x-1">
-                              <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"></div>
-                              <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse" style={{ animationDelay: "0.2s" }}></div>
-                              <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse" style={{ animationDelay: "0.4s" }}></div>
+                          <div className="bg-gray-50 rounded-xl border border-gray-200 p-3">
+                            <div className="flex items-center space-x-2">
+                              <div className="flex space-x-1">
+                                <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"></div>
+                                <div
+                                  className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"
+                                  style={{ animationDelay: "0.2s" }}
+                                ></div>
+                                <div
+                                  className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"
+                                  style={{ animationDelay: "0.4s" }}
+                                ></div>
+                              </div>
+                              <span className="text-xs text-gray-500">
+                                AI is thinking...
+                              </span>
                             </div>
-                            <span className="text-xs text-gray-500">AI is thinking...</span>
                           </div>
                         </div>
-                      </div>
-                    )}
-                    <div ref={chatMessagesEndRef} />
-                  </div>
-                )}
+                      )}
 
-                <div className="p-4 border-t border-gray-200 bg-white">
-                  <div className="flex space-x-2">
-                    <input type="text" id="aiInput" onKeyPress={handleKeyPress} placeholder="Ask a question or request..." className="flex-1 px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm bg-gray-50" />
-                    <button onClick={handleSendMessage} className="px-4 py-3 bg-gray-700 text-white rounded-xl hover:bg-gray-800 transition-colors focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed">
-                      <FiSend className="text-sm" />
-                    </button>
+                      {/* Scroll anchor */}
+                      <div ref={chatMessagesEndRef} />
+                    </div>
+                  )}
+
+                  {/* Chat Input */}
+                  <div className="p-4 border-t border-gray-200 bg-white">
+                    <div className="flex space-x-2">
+                      <input
+                        type="text"
+                        id="aiInput"
+                        // value={chatInput}
+                        onKeyPress={handleKeyPress}
+                        onChange={(e) => checkState(e.target.value)}
+                        placeholder="Ask a question or request..."
+                        className="flex-1 px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm bg-gray-50"
+                      />
+
+                      <button
+                        onClick={handleSendMessage}
+                        className="px-4 py-3 bg-gray-700 text-white rounded-xl hover:bg-gray-800 transition-colors focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <FiSend className="text-sm" />
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
             </div>
-
           </div>
         </div>
       )}

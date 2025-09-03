@@ -66,7 +66,7 @@ function EditChartDashboard() {
   const [appliedFilters, setAppliedFilters] = useState([]);
   const [selectedColumns, setSelectedColumns] = useState([]);
 
-  // ADD: Store original category order from backend
+  // Keep original category order from backend
   const [originalCategories, setOriginalCategories] = useState([]);
 
   const chartid = searchParams.get("chartid");
@@ -175,6 +175,7 @@ function EditChartDashboard() {
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, [openBlock]);
 
+  // Load dataset + chart (initial)
   useEffect(() => {
     if (!chartid || !datasetId) return;
 
@@ -182,6 +183,7 @@ function EditChartDashboard() {
       try {
         const dbToken = localStorage.getItem("db_token");
         const token = localStorage.getItem("accessToken");
+
         // 1) get raw dataset for fieldOptions
         const dsRes = await fetch(`${url.BASE_URL}/dataset/dataset1000rows/`, {
           method: "POST",
@@ -218,13 +220,11 @@ function EditChartDashboard() {
           return;
         }
 
-        // 3) normalize type
         const typeKey = chartObj.chart_type.toLowerCase();
         setChartType(typeKey);
 
-        // 4) normalize y_axis into array of "fn(field)"
+        // normalize y_axis into array of "fn(field)"
         const rawY = chartObj.y_axis;
-
         const parts = Array.isArray(rawY)
           ? rawY
           : typeof rawY === "string"
@@ -234,7 +234,6 @@ function EditChartDashboard() {
               .filter(Boolean)
           : [];
 
-        // 5) extract fn & field
         const initY = [];
         const initA = [];
         parts.forEach((item) => {
@@ -247,7 +246,7 @@ function EditChartDashboard() {
           }
         });
 
-        // 6) ensure at least 2 series for multi_bar/multi_line
+        // ensure at least 2 series for multi_bar/multi_line
         if (
           (typeKey === "multi_bar" || typeKey === "multi_line") &&
           initY.length < 2
@@ -258,7 +257,6 @@ function EditChartDashboard() {
           }
         }
 
-        // 7) populate both multi- and single-series state
         setYFields(initY);
         setAggFns(initA);
         if (initY.length === 1) {
@@ -266,13 +264,11 @@ function EditChartDashboard() {
           setAggFn(initA[0]);
         }
 
-        // 8) other chart state
         setChartTitle(chartObj.chart_title || "");
         setXField(chartObj.x_axis);
-
         setOrderBy(chartObj.order_by || "");
 
-        // **KEY CHANGES: Store original categories and use backend data**
+        // Preserve backend category order & data
         setOriginalCategories(chartDataObj.labels || []);
         setChartData(chartDataObj);
         setUserChangedFields(false);
@@ -285,59 +281,202 @@ function EditChartDashboard() {
     loadChart();
   }, [chartid, datasetId]);
 
-  // Only re-process data when user changes fields (not on initial load)
-  useEffect(() => {
-    // Only re-process if user has made changes and we have the necessary data
-    if (!userChangedFields || !xField || !datasetData.length) return;
+  // Helpers
+  function flattenFields(obj) {
+    return Object.entries(obj).reduce((acc, [k, v]) => {
+      if (v && typeof v === "object" && !Array.isArray(v)) {
+        const nested = flattenFields(v);
+        Object.entries(nested).forEach(([nk, nv]) => {
+          acc[`${k}.${nk}`] = nv;
+        });
+      } else {
+        acc[k] = v;
+      }
+      return acc;
+    }, {});
+  }
 
-    // helper to flatten nested objects
-    function flattenFields(obj) {
-      return Object.entries(obj).reduce((acc, [k, v]) => {
-        if (v && typeof v === "object" && !Array.isArray(v)) {
-          const nested = flattenFields(v);
-          Object.entries(nested).forEach(([nk, nv]) => {
-            acc[`${k}.${nk}`] = nv;
-          });
-        } else {
-          acc[k] = v;
+  const fieldOptions = datasetData.length
+    ? Object.keys(flattenFields(datasetData[0]))
+    : [];
+
+  function parseDateSafe(x) {
+    if (!x) return null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(x)) return new Date(x + "T00:00:00Z");
+    const d = new Date(x);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  // getByPath for dot-notation fields
+  const getByPath = (obj, path) =>
+    path
+      .split(".")
+      .reduce((o, p) => (o && o[p] != null ? o[p] : undefined), obj);
+
+  /**
+   * rows: array of already-flattened rows
+   * filters: [{ column, operator, value }]
+   * operators:
+   * - contains | begins_with | ends_with  (string)
+   * - = | > | <                            (number)
+   * - between                              (date; value = [from, to])
+   */
+  function applyFilters(rows, filters) {
+    if (!Array.isArray(filters) || filters.length === 0) return rows;
+
+    return rows.filter((row) => {
+      return filters.every((f) => {
+        const cell = getByPath(row, f.column);
+
+        if (cell == null) return false;
+
+        if (f.operator === "between") {
+          const [from, to] = Array.isArray(f.value) ? f.value : ["", ""];
+          const dCell = parseDateSafe(cell);
+          const dFrom = parseDateSafe(from);
+          const dTo = parseDateSafe(to);
+          if (!dCell || !dFrom || !dTo) return false;
+          return dCell >= dFrom && dCell <= dTo;
         }
-        return acc;
-      }, {});
+
+        if (f.operator === "=" || f.operator === ">" || f.operator === "<") {
+          const n = Number(cell);
+          const t = Number(f.value);
+          if (isNaN(n) || isNaN(t)) return false;
+          if (f.operator === "=") return n === t;
+          if (f.operator === ">") return n > t;
+          return n < t;
+        }
+
+        const s = String(cell ?? "").toLowerCase();
+        const v = String(f.value ?? "").toLowerCase();
+        if (f.operator === "contains") return s.includes(v);
+        if (f.operator === "begins_with") return s.startsWith(v);
+        if (f.operator === "ends_with") return s.endsWith(v);
+
+        return true;
+      });
+    });
+  }
+
+  // fields we actually want to filter on:
+  const chartFields = useMemo(() => {
+    if (chartType === "grid") return selectedColumns;
+    if (["multi_bar", "multi_line"].includes(chartType))
+      return [xField, ...yFields].filter(Boolean);
+    return [xField, yField].filter(Boolean);
+  }, [chartType, xField, yField, yFields, selectedColumns]);
+
+  // Use a flattened sample for availability check (fix for nested keys)
+  const flatSample = datasetData.length ? flattenFields(datasetData[0]) : {};
+  const availableFields = chartFields.filter((f) =>
+    Object.prototype.hasOwnProperty.call(flatSample, f)
+  );
+
+  function isOdooDateLike(v) {
+    if (v instanceof Date) return true;
+    if (typeof v !== "string") return false;
+    const s = v.trim();
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      const [y, m, d] = s.split("-").map(Number);
+      const dateObj = new Date(Date.UTC(y, m - 1, d));
+      return (
+        dateObj.getUTCFullYear() === y &&
+        dateObj.getUTCMonth() === m - 1 &&
+        dateObj.getUTCDate() === d
+      );
+    }
+
+    if (
+      /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}(?::?\d{2})?)?$/.test(
+        s
+      )
+    ) {
+      const iso = s.replace(" ", "T");
+      const d = new Date(
+        iso.includes("Z") || /[+-]\d{2}/.test(iso) ? iso : iso + "Z"
+      );
+      return !isNaN(d.getTime());
+    }
+
+    return false;
+  }
+
+  function isDateField(col) {
+    if (!col || !datasetData?.length) return false;
+    return datasetData.some((row) => isOdooDateLike(getByPath(row, col)));
+  }
+
+  function isNumberField(col) {
+    if (!col) return false;
+    return datasetData.every(
+      (row) => getByPath(row, col) == null || !isNaN(Number(getByPath(row, col)))
+    );
+  }
+
+  function getOperatorOptions(col) {
+    if (isNumberField(col)) {
+      return [
+        { value: "=", label: "=" },
+        { value: ">", label: ">" },
+        { value: "<", label: "<" },
+      ];
+    }
+    return [
+      { value: "contains", label: "Contains" },
+      { value: "begins_with", label: "Begins with" },
+      { value: "ends_with", label: "Ends with" },
+    ];
+  }
+
+  function getOrderByOptions() {
+    const opts = [];
+    if (xField) opts.push(xField);
+    if (["multi_bar", "multi_line"].includes(chartType)) {
+      opts.push(...(yFields || []));
+    } else if (yField) {
+      opts.push(yField);
+    }
+    return Array.from(new Set(opts.filter(Boolean)));
+  }
+
+  // Re-process data when fields OR filters change
+  useEffect(() => {
+    // Allow recompute if:
+    //  - user changed any fields, OR
+    //  - there are active filters
+    if ((!userChangedFields && appliedFilters.length === 0) || !xField || !datasetData.length) {
+      return;
     }
 
     // flatten all rows
     const flatRows = datasetData.map(flattenFields);
-const rowsToUse = applyFilters(flatRows, appliedFilters);
-    // **FIXED: Use original categories order if available, otherwise create new**
+    const rowsToUse = applyFilters(flatRows, appliedFilters);
+
+    // categories respecting original order from backend
     let categories;
     if (originalCategories.length > 0) {
-      // Use original order from backend, but filter to only include categories that exist in current data
-      const currentCategories = Array.from(new Set(rowsToUse.map(r => r[xField])));
-      categories = originalCategories.filter((cat) =>
+      const currentCategories = Array.from(new Set(rowsToUse.map((r) => r[xField])));
+      const ordered = originalCategories.filter((cat) =>
         currentCategories.includes(cat)
       );
-
-      // Add any new categories that weren't in original (in case data changed)
-      const newCategories = currentCategories.filter(
+      const newOnes = currentCategories.filter(
         (cat) => !originalCategories.includes(cat)
       );
-      categories = [...categories, ...newCategories];
+      categories = [...ordered, ...newOnes];
     } else {
-      // Fallback to current data order
-      categories = Array.from(new Set(flatRows.map((r) => r[xField])));
+      categories = Array.from(new Set(rowsToUse.map((r) => r[xField])));
     }
 
     let newChartData;
 
     if (chartType === "multi_bar" || chartType === "multi_line") {
-      // build spec objects, ignore any blank fields
       const specs = yFields
         .map((field, i) => ({ field, agg: aggFns[i] }))
         .filter((s) => s.field);
 
-      // one series per spec
       const datasets = specs.map(({ field, agg }) => {
-        // group values by category
         const grouped = {};
         rowsToUse.forEach((r) => {
           const key = r[xField];
@@ -346,7 +485,6 @@ const rowsToUse = applyFilters(flatRows, appliedFilters);
           if (!isNaN(val)) grouped[key].push(val);
         });
 
-        // compute the aggregated value for each category IN THE SAME ORDER
         const data = categories.map((cat) => {
           const arr = grouped[cat] || [];
           if (!arr.length) return 0;
@@ -359,7 +497,7 @@ const rowsToUse = applyFilters(flatRows, appliedFilters);
               return Math.max(...arr);
             case "min":
               return Math.min(...arr);
-            default: // sum
+            default:
               return arr.reduce((a, b) => a + b, 0);
           }
         });
@@ -372,7 +510,6 @@ const rowsToUse = applyFilters(flatRows, appliedFilters);
 
       newChartData = { labels: categories, datasets };
     } else {
-      // Single-series path
       const grouped = {};
       rowsToUse.forEach((r) => {
         const key = r[xField];
@@ -381,7 +518,6 @@ const rowsToUse = applyFilters(flatRows, appliedFilters);
         if (!isNaN(val)) grouped[key].push(val);
       });
 
-      // Use the same categories array and map data to it
       const data = categories.map((cat) => {
         const arr = grouped[cat] || [];
         if (!arr.length) return 0;
@@ -416,178 +552,13 @@ const rowsToUse = applyFilters(flatRows, appliedFilters);
     chartType,
     userChangedFields,
     originalCategories,
-    appliedFilters
+    appliedFilters, // <- key: recompute when filters change
   ]);
 
-  function flattenFields(obj) {
-    return Object.entries(obj).reduce((acc, [k, v]) => {
-      if (v && typeof v === "object" && !Array.isArray(v)) {
-        const nested = flattenFields(v);
-        Object.entries(nested).forEach(([nk, nv]) => {
-          acc[`${k}.${nk}`] = nv;
-        });
-      } else {
-        acc[k] = v;
-      }
-      return acc;
-    }, {});
-  }
-
-  const fieldOptions = datasetData.length
-    ? Object.keys(flattenFields(datasetData[0]))
-    : [];
-function parseDateSafe(x) {
-  if (!x) return null;
-  // support YYYY-MM-DD as UTC midnight
-  if (/^\d{4}-\d{2}-\d{2}$/.test(x)) return new Date(x + "T00:00:00Z");
-  const d = new Date(x);
-  return isNaN(d.getTime()) ? null : d;
-}
-
-/**
- * rows: array of already-flattened rows
- * filters: [{ column, operator, value }]
- * operators supported:
- * - contains | begins_with | ends_with  (string)
- * - = | > | <                            (number)
- * - between                              (date; value = [from, to])
- */
-function applyFilters(rows, filters) {
-  if (!Array.isArray(filters) || filters.length === 0) return rows;
-
-  return rows.filter((row) => {
-    return filters.every((f) => {
-      const cell = getByPath(row, f.column);
-
-      if (cell == null) return false;
-
-      // date range
-      if (f.operator === "between") {
-        const [from, to] = Array.isArray(f.value) ? f.value : ["", ""];
-        const dCell = parseDateSafe(cell);
-        const dFrom = parseDateSafe(from);
-        const dTo = parseDateSafe(to);
-        if (!dCell || !dFrom || !dTo) return false;
-        return dCell >= dFrom && dCell <= dTo;
-      }
-
-      // numeric ops
-      if (f.operator === "=" || f.operator === ">" || f.operator === "<") {
-        const n = Number(cell);
-        const t = Number(f.value);
-        if (isNaN(n) || isNaN(t)) return false;
-        if (f.operator === "=") return n === t;
-        if (f.operator === ">") return n > t;
-        return n < t;
-      }
-
-      // string ops
-      const s = String(cell ?? "").toLowerCase();
-      const v = String(f.value ?? "").toLowerCase();
-      if (f.operator === "contains") return s.includes(v);
-      if (f.operator === "begins_with") return s.startsWith(v);
-      if (f.operator === "ends_with") return s.endsWith(v);
-
-      // unknown operator → keep row
-      return true;
-    });
-  });
-}
-  // fields we actually want to filter on:
-  const chartFields = useMemo(() => {
-    if (chartType === "grid") return selectedColumns;
-    if (["multi_bar", "multi_line"].includes(chartType))
-      return [xField, ...yFields].filter(Boolean);
-    return [xField, yField].filter(Boolean);
-  }, [chartType, xField, yField, yFields, selectedColumns]);
-
-  // filter out any that aren’t in your flattened data
-  const availableFields = chartFields.filter((f) =>
-    Object.prototype.hasOwnProperty.call(datasetData[0] || {}, f)
-  );
-
-  const getByPath = (obj, path) =>
-    path
-      .split(".")
-      .reduce((o, p) => (o && o[p] != null ? o[p] : undefined), obj);
-  // 2) Turn that into your field‐detector:
-  function isOdooDateLike(v) {
-    if (v instanceof Date) return true;
-    if (typeof v !== "string") return false;
-
-    const s = v.trim();
-
-    // pure date: YYYY-MM-DD
-    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
-      const [y, m, d] = s.split("-").map(Number);
-      const dateObj = new Date(Date.UTC(y, m - 1, d)); // UTC to avoid timezone shifts
-      return (
-        dateObj.getUTCFullYear() === y &&
-        dateObj.getUTCMonth() === m - 1 &&
-        dateObj.getUTCDate() === d
-      );
-    }
-
-    // datetime: YYYY-MM-DD HH:mm:ss(.microsec)?(TZ?)
-    if (
-      /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}(?::?\d{2})?)?$/.test(
-        s
-      )
-    ) {
-      const iso = s.replace(" ", "T");
-      const d = new Date(
-        iso.includes("Z") || /[+-]\d{2}/.test(iso) ? iso : iso + "Z"
-      );
-      return !isNaN(d.getTime());
-    }
-
-    return false;
-  }
-
-  function isDateField(col) {
-    if (!col || !datasetData?.length) return false;
-    return datasetData.some((row) => isOdooDateLike(getByPath(row, col)));
-  }
-
-  // 3. Numeric test (you already have something similar):
-  function isNumberField(col) {
-    if (!col) return false;
-    return datasetData.every(
-      (row) => row[col] == null || !isNaN(Number(row[col]))
-    );
-  }
-
-  // 4. Operator choices for non-date fields:
-  function getOperatorOptions(col) {
-    if (isNumberField(col)) {
-      return [
-        { value: "=", label: "=" },
-        { value: ">", label: ">" },
-        { value: "<", label: "<" },
-      ];
-    }
-    return [
-      { value: "contains", label: "Contains" },
-      { value: "begins_with", label: "Begins with" },
-      { value: "ends_with", label: "Ends with" },
-    ];
-  }
-
-  function getOrderByOptions() {
-    const opts = [];
-    if (xField) opts.push(xField);
-    if (["multi_bar", "multi_line"].includes(chartType)) {
-      opts.push(...(yFields || []));
-    } else if (yField) {
-      opts.push(yField);
-    }
-    return Array.from(new Set(opts.filter(Boolean)));
-  }
-
   function getHighchartsOptions() {
-    const typeKey = chartType.toLowerCase();
-    const labels = chartData.labels || [];
-    // choose palette
+    const typeKey = String(chartType || "").toLowerCase();
+    const labels = chartData?.labels || [];
+
     const palette =
       typeKey === "pie"
         ? PIE_COLORS
@@ -595,7 +566,6 @@ function applyFilters(rows, filters) {
         ? LINE_COLORS
         : OTHER_COLORS;
 
-    // base options
     const opts = {
       colors: palette,
       chart: {
@@ -606,7 +576,6 @@ function applyFilters(rows, filters) {
       xAxis: { categories: labels, title: { text: null } },
       yAxis: {
         title: {
-          // hide Y-axis title for multi-series
           text:
             typeKey === "multi_bar" || typeKey === "multi_line"
               ? null
@@ -619,18 +588,16 @@ function applyFilters(rows, filters) {
       legend: { enabled: true },
     };
 
-    // —— multi-series case ——
     if (typeKey === "multi_bar" || typeKey === "multi_line") {
       opts.chart.type = typeKey === "multi_bar" ? "column" : "line";
-      opts.series = chartData.datasets.map((ds) => ({
+      opts.series = (chartData?.datasets || []).map((ds) => ({
         name: ds.label,
         data: ds.data,
       }));
       return opts;
     }
 
-    // —— single-series case ——
-    const ds = chartData.datasets[0] || { label: chartTitle, data: [] };
+    const ds = (chartData?.datasets || [])[0] || { label: chartTitle, data: [] };
     const baseSeries = { name: ds.label || chartTitle };
 
     switch (typeKey) {
@@ -744,6 +711,7 @@ function applyFilters(rows, filters) {
           },
         };
         break;
+
       default:
         opts.series = [{ ...baseSeries, data: ds.data }];
         break;
@@ -769,12 +737,12 @@ function applyFilters(rows, filters) {
       if (!dbToken) {
         return Swal.fire("Error", "Database connection info missing.", "error");
       }
-      // build single-series payload
       const payload = {
         chart_title: chartTitle,
         chart_type: chartType,
         x_axis: xField,
         y_axis: `${aggFn}(${yField})`,
+        filter: JSON.stringify(appliedFilters),
         db_token: dbToken,
       };
       if (orderBy) payload.order_by = orderBy;
@@ -802,13 +770,11 @@ function applyFilters(rows, filters) {
       return;
     }
 
-    // MULTI-SERIES VALIDATION & FILTERING
-    // Pair up yFields and aggFns, then drop any with empty field
+    // MULTI-SERIES
     const seriesSpecs = yFields
       .map((field, i) => ({ field: field.trim(), agg: aggFns[i] }))
       .filter((spec) => spec.field);
 
-    // Need at least two non-empty series
     if (seriesSpecs.length < 2) {
       return Swal.fire(
         "Error",
@@ -817,7 +783,6 @@ function applyFilters(rows, filters) {
       );
     }
 
-    // Build payload
     const payload = {
       chart_title: chartTitle,
       chart_type: chartType,
@@ -825,7 +790,6 @@ function applyFilters(rows, filters) {
       y_axis: seriesSpecs.map((s) => `${s.agg}(${s.field})`),
     };
 
-    // Submit update
     const res = await fetch(`${url.BASE_URL}/api/dataset/chart/${chartid}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -848,10 +812,7 @@ function applyFilters(rows, filters) {
     }
     return (
       <div className="w-[600px] mx-auto h-[400px]">
-        <HighchartsReact
-          highcharts={Highcharts}
-          options={getHighchartsOptions()}
-        />
+        <HighchartsReact highcharts={Highcharts} options={getHighchartsOptions()} />
       </div>
     );
   }
@@ -930,6 +891,7 @@ function applyFilters(rows, filters) {
             </div>
           )}
         </aside>
+
         {filterPanelOpen && (
           <div className="fixed top-[60px] left-[70px] w-[300px] h-[600px] z-30 flex bg-opacity-50">
             <div className="bg-white border w-full rounded-lg overflow-hidden drop-shadow-lg">
@@ -979,7 +941,6 @@ function applyFilters(rows, filters) {
                   </select>
 
                   {isDateField(filterDraft.column) ? (
-                    /* ─── DATE RANGE PICKER ───────────────── */
                     <>
                       <input
                         type="date"
@@ -1024,13 +985,14 @@ function applyFilters(rows, filters) {
                             operator: "",
                             value: "",
                           });
+                          // optional: mark as change
+                          // setUserChangedFields(true);
                         }}
                       >
                         Add
                       </button>
                     </>
                   ) : (
-                    /* ─── NON‐DATE FILTER ─────────────────── */
                     <>
                       <select
                         className="border w-full p-2 rounded"
@@ -1080,6 +1042,7 @@ function applyFilters(rows, filters) {
                             operator: "",
                             value: "",
                           });
+                          // optional: setUserChangedFields(true);
                         }}
                       >
                         Add
@@ -1138,6 +1101,7 @@ function applyFilters(rows, filters) {
             </div>
           </div>
         )}
+
         {/* MAIN CANVAS */}
         <div className="flex-1 ml-[60px] p-6 overflow-auto">
           <h1 className="text-2xl font-semibold mb-6">Edit Chart</h1>
@@ -1243,7 +1207,6 @@ function applyFilters(rows, filters) {
                       </select>
                     </div>
 
-                    {/* Remove this series (only if you have more than 2) */}
                     {yFields.length > 2 && (
                       <button
                         className="absolute right-1 -top-1 text-red-500 text-lg leading-none"
@@ -1277,7 +1240,6 @@ function applyFilters(rows, filters) {
                 </button>
               </>
             ) : (
-              /* Single-series fallback */
               <>
                 <div>
                   <label className="block mb-1">Y Axis</label>
