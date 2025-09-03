@@ -7,7 +7,20 @@ import RGL, { WidthProvider } from 'react-grid-layout'
 import Navbar from '../components/Navbar'
 import { authUrl, url } from '../config'
 import { toast } from "react-toastify"
+// File: /pages/ViewDashboard.jsx
+/* eslint-disable react-hooks/exhaustive-deps */
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useSearchParams, useNavigate } from 'react-router-dom'
+import Swal from 'sweetalert2'
+import RGL, { WidthProvider } from 'react-grid-layout'
+import Navbar from '../components/Navbar'
+import { authUrl, url } from '../config'
+import { toast } from "react-toastify"
 
+// Icons
+import { RiFilter2Line, RiRobot2Line } from "react-icons/ri"
+import { MdOutlineAddchart } from "react-icons/md"
+import { RxDragHandleDots2 } from "react-icons/rx"
 // Icons
 import { RiFilter2Line, RiRobot2Line } from "react-icons/ri"
 import { MdOutlineAddchart } from "react-icons/md"
@@ -28,7 +41,40 @@ import Highcharts from "highcharts";
 import HighchartsReact from "highcharts-react-official";
 import "highcharts/highcharts-more";
 import "highcharts/modules/stock";
+import "highcharts/modules/stock";
 import "highcharts/modules/map";
+import "highcharts/modules/boost";
+
+// Reduce work: disable global animation; prefer local time
+Highcharts.setOptions({
+  chart: { animation: false },
+  plotOptions: {
+    series: {
+      animation: false,
+      states: {
+        hover: { halo: { size: 0 } },
+        inactive: { opacity: 1 },
+      },
+    }
+  },
+  time: { useUTC: false },
+  boost: {
+    useGPUTranslations: true,
+    seriesThreshold: 1, // boost as early as possible if data is big
+  },
+  credits: { enabled: false },
+});
+
+// shallow compare utility
+const shallowEqual = (a, b) => {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== "object" || typeof b !== "object" || !a || !b) return false;
+  const ka = Object.keys(a), kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  for (const k of ka) if (!Object.is(a[k], b[k])) return false;
+  return true;
+};
+
 import "highcharts/modules/boost";
 
 // Reduce work: disable global animation; prefer local time
@@ -66,8 +112,12 @@ const shallowEqual = (a, b) => {
 const GridLayout = WidthProvider(RGL)
 const ROW_HEIGHT = 30
 const COLS = 12
+const GridLayout = WidthProvider(RGL)
+const ROW_HEIGHT = 30
+const COLS = 12
 
 // Color palette
+const LINE_COLORS = ['rgb(207,37,0)', 'rgb(7,164,199)']
 const LINE_COLORS = ['rgb(207,37,0)', 'rgb(7,164,199)']
 const OTHER_COLORS = [
   'rgb(165,148,249)', 'rgb(176,219,156)', 'rgb(255,128,128)',
@@ -162,6 +212,12 @@ function buildPresetQuery(field, preset) { if (!preset || preset === 'All') retu
 
 // ---------- AutoSizeHighchart (debounced) + SmartChart (lazy) ----------
 const AutoSizeHighchart = React.memo(function AutoSizeHighchart({
+function labelsLookLikeDates(labels) { if (!Array.isArray(labels) || labels.length === 0) return false; let valid = 0; const sample = labels.slice(0, Math.min(12, labels.length)); for (const lbl of sample) { const t = Date.parse(lbl); if (!isNaN(t)) valid++ } return valid >= Math.ceil(sample.length * 0.6) }
+
+function buildPresetQuery(field, preset) { if (!preset || preset === 'All') return ''; const map = { '7D': '7d', '30D': '30d', '90D': '90d', '1Y': '1y', 'YTD': 'ytd' }; const date = map[preset] || String(preset).toLowerCase(); const params = new URLSearchParams(); params.set('date', date); if (field) params.set('field', field); const qs = params.toString(); return qs ? `?${qs}` : '' }
+
+// ---------- AutoSizeHighchart (debounced) + SmartChart (lazy) ----------
+const AutoSizeHighchart = React.memo(function AutoSizeHighchart({
   options,
   constructorType = "chart",
   minHeight = 120,
@@ -169,7 +225,10 @@ const AutoSizeHighchart = React.memo(function AutoSizeHighchart({
   const containerRef = useRef(null);
   const chartRef = useRef(null);
   const lastOptionsRef = useRef(options);
+  const lastOptionsRef = useRef(options);
 
+  // Only allow chart update when options reference truly changes
+  const allowUpdate = options !== lastOptionsRef.current;
   // Only allow chart update when options reference truly changes
   const allowUpdate = options !== lastOptionsRef.current;
   useEffect(() => {
@@ -178,14 +237,23 @@ const AutoSizeHighchart = React.memo(function AutoSizeHighchart({
 
   useEffect(() => {
     if (!containerRef.current || !chartRef.current) return;
+    if (allowUpdate) lastOptionsRef.current = options;
+  }, [allowUpdate, options]);
+
+  useEffect(() => {
+    if (!containerRef.current || !chartRef.current) return;
     const el = containerRef.current;
     let rafId = 0;
+    const ro = new ResizeObserver(([entry]) => {
     const ro = new ResizeObserver(([entry]) => {
       if (!entry || !chartRef.current) return;
       const { width, height } = entry.contentRect;
       const w = Math.max(60, Math.floor(width));
       const h = Math.max(minHeight, Math.floor(height));
       cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        if (chartRef.current) chartRef.current.setSize(w, h, false);
+      });
       rafId = requestAnimationFrame(() => {
         if (chartRef.current) chartRef.current.setSize(w, h, false);
       });
@@ -202,6 +270,7 @@ const AutoSizeHighchart = React.memo(function AutoSizeHighchart({
       <HighchartsReact
         highcharts={Highcharts}
         options={options}
+        options={options}
         constructorType={constructorType}
         callback={(chart) => {
           chartRef.current = chart;
@@ -210,9 +279,81 @@ const AutoSizeHighchart = React.memo(function AutoSizeHighchart({
         allowChartUpdate={allowUpdate}
         immutable={false}
         oneToOne={false}
+        // Prevent HighchartsReact from updating unless we want it to
+        allowChartUpdate={allowUpdate}
+        immutable={false}
+        oneToOne={false}
       />
     </div>
   );
+}, shallowEqual);
+
+function SmartChart({ options, constructorType = 'chart', minHeight = 120 }) {
+  const [visible, setVisible] = useState(false)
+  const hostRef = useRef(null)
+
+  useEffect(() => {
+    let observer; let idleId
+    const start = () => {
+      if ('requestIdleCallback' in window) {
+        idleId = window.requestIdleCallback(() => setVisible(true), { timeout: 1200 })
+      } else {
+        idleId = setTimeout(() => setVisible(true), 300)
+      }
+    }
+    if (hostRef.current && 'IntersectionObserver' in window) {
+      observer = new IntersectionObserver((entries) => {
+        if (entries[0]?.isIntersecting) {
+          start()
+          observer.disconnect()
+        }
+      }, { rootMargin: '200px' })
+      observer.observe(hostRef.current)
+    } else {
+      start()
+    }
+    return () => {
+      if (observer) observer.disconnect()
+      if ('cancelIdleCallback' in window && idleId) window.cancelIdleCallback(idleId)
+      else clearTimeout(idleId)
+    }
+  }, [])
+
+  return (
+    <div ref={hostRef} className="w-full h-full">
+      {visible ? (
+        <AutoSizeHighchart options={options} constructorType={constructorType} minHeight={minHeight} />
+      ) : (
+        <div className="w-full h-full grid place-items-center text-xs text-gray-400">Preparing…</div>
+      )}
+    </div>
+  )
+}
+
+// --- Pie/Doughnut performance helpers ---
+// Group long-tail pie/doughnut slices into "Other" while preserving animations
+function groupPieData(labels = [], values = [], {
+  maxSlices = 11,    // default: 10 + 1 Other
+  minPercent = 0.01, // group <1% into Other
+} = {}) {
+  const pairs = labels.map((name, i) => ({ name, y: Number(values[i]) || 0 }))
+  const total = pairs.reduce((s, p) => s + p.y, 0) || 1
+  const nonZero = pairs.filter(p => p.y > 0).sort((a, b) => b.y - a.y)
+
+  const main = []
+  let other = 0
+  for (let i = 0; i < nonZero.length; i++) {
+    const p = nonZero[i]
+    const pct = p.y / total
+    if (i < maxSlices - 1 && pct >= minPercent) main.push(p)
+    else other += p.y
+  }
+  if (other > 0) main.push({ name: "Other", y: other })
+  return { data: main, total }
+}
+
+
+// ---------- Build chart options (with perf tweaks) ----------
 }, shallowEqual);
 
 function SmartChart({ options, constructorType = 'chart', minHeight = 120 }) {
@@ -294,7 +435,15 @@ function buildChartOptions(chart, colorOffset = 0, useStock = false) {
     ...palette.slice(colorOffset % palette.length),
     ...palette.slice(0, colorOffset % palette.length),
   ]
+  ]
 
+  const baseStockBits = useStock ? {
+    rangeSelector: { enabled: false },
+    navigator: { enabled: true },
+    scrollbar: { enabled: true },
+    xAxis: { type: 'datetime' },
+    tooltip: { split: true },
+  } : {}
   const baseStockBits = useStock ? {
     rangeSelector: { enabled: false },
     navigator: { enabled: true },
@@ -304,6 +453,7 @@ function buildChartOptions(chart, colorOffset = 0, useStock = false) {
   } : {}
 
   const base = {
+    title: { text: chart_title || '' },
     title: { text: chart_title || '' },
     legend: { enabled: true },
     colors: rotated,
@@ -319,7 +469,14 @@ function buildChartOptions(chart, colorOffset = 0, useStock = false) {
   const zoomXYTypes = ['scatter', 'bubble']
   const isXYZoom = zoomXYTypes.includes(type)
   const isZoomable = zoomXTypes.includes(type) || isXYZoom
+  }
 
+  const zoomXTypes = ['line', 'multi_line', 'area', 'areaspline', 'bar', 'multi_bar', 'column']
+  const zoomXYTypes = ['scatter', 'bubble']
+  const isXYZoom = zoomXYTypes.includes(type)
+  const isZoomable = zoomXTypes.includes(type) || isXYZoom
+
+  if (isZoomable || useStock) {
   if (isZoomable || useStock) {
     base.chart = {
       ...base.chart,
@@ -327,7 +484,48 @@ function buildChartOptions(chart, colorOffset = 0, useStock = false) {
       pinchType: isXYZoom || useStock ? 'x' : 'x',
       panning: { enabled: true, type: 'x' },
       panKey: 'shift',
+      zoomType: isXYZoom || useStock ? 'x' : 'x',
+      pinchType: isXYZoom || useStock ? 'x' : 'x',
+      panning: { enabled: true, type: 'x' },
+      panKey: 'shift',
       resetZoomButton: { theme: { r: 6 } },
+    }
+  }
+
+  function normalizeCol(s) {
+    return String(s || '')
+      .replace(/\s+/g, ' ')
+      .replace(/["'`]/g, '')
+      .replace(/\b(sum|avg|count|min|max)\s*\(|\)/gi, '') // strip simple agg wrappers
+      .trim()
+      .toLowerCase()
+  }
+
+  function findYSeriesIndices(chartData, colName) {
+    const data = chartData?.data || {}
+    const datasets = Array.isArray(data.datasets) ? data.datasets : []
+    const yRaw = chartData?.y_axis ?? data?.y_axis ?? chartData?.y_axis_title ?? ''
+    const yCols = Array.isArray(yRaw) ? yRaw : String(yRaw).split(',').map(s => s.trim()).filter(Boolean)
+
+    if (!colName) return []
+
+    const target = normalizeCol(colName)
+
+    // 1) exact match against y_axis list (by index)
+    const idxInY = yCols.findIndex(c => normalizeCol(c) === target)
+    if (idxInY !== -1 && idxInY < datasets.length) return [idxInY]
+
+    // 2) match against dataset labels (by name)
+    const labelMatches = []
+    datasets.forEach((ds, i) => {
+      const lab = normalizeCol(ds?.label)
+      if (lab && (lab === target || lab.includes(target))) labelMatches.push(i)
+    })
+    if (labelMatches.length) return labelMatches
+
+    // 3) fallback: if single series, use it; if multi, apply across all
+    if (datasets.length === 1) return [0]
+    return datasets.map((_, i) => i)
     }
   }
 
@@ -371,10 +569,16 @@ function buildChartOptions(chart, colorOffset = 0, useStock = false) {
     datasets.map((ds, i) => {
       const s = { name: ds.label ?? `Series ${i + 1}` }
       const c = rotated[i % rotated.length]
+      const s = { name: ds.label ?? `Series ${i + 1}` }
+      const c = rotated[i % rotated.length]
 
       if (useStock) {
         s.data = (ds.data || [])
           .map((y, idx) => {
+            const t = Date.parse(labels[idx])
+            const yy = typeof y === 'number' ? y : parseFloat(y)
+            if (isNaN(t) || isNaN(yy)) return null
+            return [t, yy]
             const t = Date.parse(labels[idx])
             const yy = typeof y === 'number' ? y : parseFloat(y)
             if (isNaN(t) || isNaN(yy)) return null
@@ -385,8 +589,15 @@ function buildChartOptions(chart, colorOffset = 0, useStock = false) {
         s.tooltip = { valueDecimals: 2 }
         s.animation = false
         return s
+          .filter(Boolean)
+        s.type = (type === 'area' || type === 'areaspline') ? 'areaspline' : 'line'
+        s.tooltip = { valueDecimals: 2 }
+        s.animation = false
+        return s
       }
 
+      if (type === 'scatter') {
+        s.type = 'scatter'
       if (type === 'scatter') {
         s.type = 'scatter'
         s.data = (ds.data || [])
@@ -394,7 +605,13 @@ function buildChartOptions(chart, colorOffset = 0, useStock = false) {
             if (pt && typeof pt === 'object' && 'x' in pt && 'y' in pt) return [pt.x, pt.y]
             const y = typeof pt === 'number' ? pt : parseFloat(pt)
             return isNaN(y) ? null : [idx, y]
+            if (pt && typeof pt === 'object' && 'x' in pt && 'y' in pt) return [pt.x, pt.y]
+            const y = typeof pt === 'number' ? pt : parseFloat(pt)
+            return isNaN(y) ? null : [idx, y]
           })
+          .filter(Boolean)
+        s.animation = false
+        return s
           .filter(Boolean)
         s.animation = false
         return s
@@ -402,8 +619,15 @@ function buildChartOptions(chart, colorOffset = 0, useStock = false) {
 
       if (type === 'bubble') {
         s.type = 'bubble'
+      if (type === 'bubble') {
+        s.type = 'bubble'
         s.data = (ds.data || [])
           .map((val, idx) => {
+            const lbl = labels[idx]
+            const x = parseFloat(lbl)
+            const y = typeof val === 'number' ? val : parseFloat(val)
+            if (isNaN(x) || isNaN(y)) return null
+            return { x, y, z: y, name: String(lbl) }
             const lbl = labels[idx]
             const x = parseFloat(lbl)
             const y = typeof val === 'number' ? val : parseFloat(val)
@@ -432,7 +656,33 @@ function buildChartOptions(chart, colorOffset = 0, useStock = false) {
         s.color = c
         s.marker = { enabled: false }
         s.animation = false
+          .filter(Boolean)
+        s.animation = false
+        return s
       }
+
+      if (['bar', 'multi_bar', 'column'].includes(type)) {
+        s.type = 'column'
+        s.color = c
+        s.borderColor = c
+        s.borderWidth = 0
+        s.animation = false
+      } else if (['line', 'multi_line'].includes(type)) {
+        s.type = 'line'
+        s.color = c
+        s.fillColor = transparentizeRgb(c)
+        s.marker = { enabled: false }
+        s.animation = false
+      } else if (['radar', 'area', 'areaspline', 'polar', 'polararea', 'polar-area'].includes(type)) {
+        s.type = (type === 'areaspline') ? 'areaspline' : (type === 'area') ? 'area' : 'line'
+        s.color = c
+        s.marker = { enabled: false }
+        s.animation = false
+      }
+      s.data = ds.data || []
+      return s
+    })
+
       s.data = ds.data || []
       return s
     })
@@ -442,7 +692,12 @@ function buildChartOptions(chart, colorOffset = 0, useStock = false) {
     case 'line':
     case 'area':
     case 'areaspline':
+    case 'multi_line':
+    case 'line':
+    case 'area':
+    case 'areaspline':
       if (useStock) {
+        base.series = makeSeries()
         base.series = makeSeries()
       } else {
         base.chart.type = (type === 'areaspline') ? 'areaspline' : (type === 'area') ? 'area' : 'line'
@@ -450,9 +705,24 @@ function buildChartOptions(chart, colorOffset = 0, useStock = false) {
         base.yAxis = { title: { text: y_axis || '' } }
         base.series = makeSeries()
         base.plotOptions = { line: { marker: { enabled: false } } }
+        base.chart.type = (type === 'areaspline') ? 'areaspline' : (type === 'area') ? 'area' : 'line'
+        base.xAxis = { categories: labels, title: { text: x_axis || '' } }
+        base.yAxis = { title: { text: y_axis || '' } }
+        base.series = makeSeries()
+        base.plotOptions = { line: { marker: { enabled: false } } }
       }
       break
+      break
 
+    case 'multi_bar':
+    case 'bar':
+    case 'column':
+      base.chart.type = 'column'
+      base.xAxis = { categories: labels, title: { text: x_axis || '' } }
+      base.yAxis = { title: { text: y_axis || '' } }
+      base.series = makeSeries()
+      base.plotOptions = { column: { borderWidth: 0, pointPadding: 0.1, groupPadding: 0.1 } }
+      break
     case 'multi_bar':
     case 'bar':
     case 'column':
@@ -492,10 +762,44 @@ function buildChartOptions(chart, colorOffset = 0, useStock = false) {
         })),
       }]
       break
+    case 'pie':
+    case 'doughnut': {
+      const ds0 = datasets[0] || { data: [] }
+      const values = ds0.data || []
+
+      // 🔑 group tail into "Other", keep top 10 slices
+      const { data: grouped } = groupPieData(labels, values, {
+        maxSlices: 11,    // 10 slices + 1 "Other"
+        minPercent: 0.0,  // or keep at 0.01 if you want <1% auto-grouped
+      })
+
+      const maxValue = grouped.length
+        ? Math.max(...grouped.map(v => v.y || 0)) : null
+      const maxIndex = maxValue !== null
+        ? grouped.findIndex(v => +v.y === maxValue) : -1
+
+      base.chart.type = 'pie'
+      base.series = [{
+        name: ds0.label || 'Pie',
+        innerSize: type === 'doughnut' ? '60%' : '0%',
+        data: grouped.map((p, i) => ({
+          name: p.name,
+          y: p.y,
+          color: OTHER_COLORS[i % OTHER_COLORS.length],
+          sliced: i === maxIndex,
+          selected: i === maxIndex,
+        })),
+      }]
+      break
     }
 
 
 
+
+
+    case 'worldmap': {
+      const values = datasets?.[0]?.data || []
+      const mapDataArr = labels.map((lbl, i) => [String(lbl || '').trim().toLowerCase(), Number(values[i]) || 0])
     case 'worldmap': {
       const values = datasets?.[0]?.data || []
       const mapDataArr = labels.map((lbl, i) => [String(lbl || '').trim().toLowerCase(), Number(values[i]) || 0])
@@ -503,17 +807,28 @@ function buildChartOptions(chart, colorOffset = 0, useStock = false) {
         chart: { map: worldMap },
         title: { text: chart_title || '' },
         mapNavigation: { enabled: true, enableDoubleClickZoom: true, enableMouseWheelZoom: true, enableTouchZoom: true, enableButtons: true },
+        title: { text: chart_title || '' },
+        mapNavigation: { enabled: true, enableDoubleClickZoom: true, enableMouseWheelZoom: true, enableTouchZoom: true, enableButtons: true },
         colorAxis: { min: 0 },
         series: [{ type: 'map', name: chart_title || 'World Map', data: mapDataArr, joinBy: 'hc-key', states: { hover: { color: '#BADA55' } }, dataLabels: { enabled: false }, nullColor: '#f2f2f2' }],
+        series: [{ type: 'map', name: chart_title || 'World Map', data: mapDataArr, joinBy: 'hc-key', states: { hover: { color: '#BADA55' } }, dataLabels: { enabled: false }, nullColor: '#f2f2f2' }],
         credits: { enabled: false },
+        tooltip: { animation: false },
+      }
         tooltip: { animation: false },
       }
     }
 
     case 'grid':
       return base
+    case 'grid':
+      return base
 
     default:
+      base.chart.type = 'areaspline'
+      base.xAxis = { categories: labels, title: { text: x_axis || '' } }
+      base.yAxis = { title: { text: y_axis || '' } }
+      base.series = makeSeries()
       base.chart.type = 'areaspline'
       base.xAxis = { categories: labels, title: { text: x_axis || '' } }
       base.yAxis = { title: { text: y_axis || '' } }
@@ -523,10 +838,25 @@ function buildChartOptions(chart, colorOffset = 0, useStock = false) {
   base.tooltip = base.tooltip || {}
   base.tooltip.animation = false
   return base
+  base.tooltip = base.tooltip || {}
+  base.tooltip.animation = false
+  return base
 }
 
 // ---------- normalize layout ----------
+// ---------- normalize layout ----------
 function normalizeRglLayout(baseWidgets) {
+  if (!Array.isArray(baseWidgets) || baseWidgets.length === 0) return []
+  const positions = baseWidgets.map(w => `${w.layout?.x ?? 0},${w.layout?.y ?? 0}`)
+  const uniquePositions = new Set(positions)
+  const needsSpacing = uniquePositions.size === 1 && positions[0] === "0,0"
+  const xs = baseWidgets.map(w => Number(w.layout?.x ?? 0))
+  const ys = baseWidgets.map(w => Number(w.layout?.y ?? 0))
+  const hasZeroX = xs.some(v => v === 0)
+  const hasZeroY = ys.some(v => v === 0)
+  const minX = Math.min(...xs)
+  const minY = Math.min(...ys)
+  const looksOneBased = !hasZeroX && !hasZeroY && (minX >= 1 || minY >= 1)
   if (!Array.isArray(baseWidgets) || baseWidgets.length === 0) return []
   const positions = baseWidgets.map(w => `${w.layout?.x ?? 0},${w.layout?.y ?? 0}`)
   const uniquePositions = new Set(positions)
@@ -543,12 +873,16 @@ function normalizeRglLayout(baseWidgets) {
     const x = Number(w.layout?.x ?? 0)
     const y = Number(w.layout?.y ?? 0)
     const widgetKey = w.key || `${w.type}-${w.id}`
+    const x = Number(w.layout?.x ?? 0)
+    const y = Number(w.layout?.y ?? 0)
+    const widgetKey = w.key || `${w.type}-${w.id}`
     return {
       ...w,
       key: widgetKey,
       layout: {
         i: widgetKey,
         x: looksOneBased ? Math.max(0, x - 1) : x,
+        y: looksOneBased ? Math.max(0, y - 1) : (needsSpacing ? y + (index * 4) : y),
         y: looksOneBased ? Math.max(0, y - 1) : (needsSpacing ? y + (index * 4) : y),
         w: Number(w.layout?.w ?? 4),
         h: Number(w.layout?.h ?? 4),
@@ -719,7 +1053,36 @@ const ChartCard = React.memo(function ChartCard({
 
 
 // ---------- main component ----------
+// ---------- main component ----------
 export default function ViewDashboard() {
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const id = searchParams.get('id')
+  const dashSchema = localStorage.getItem("db_schema")
+  const token = localStorage.getItem('accessToken')
+  const dbToken = localStorage.getItem('db_token')
+
+  const [dashboardName, setDashboardName] = useState('')
+  const [widgets, setWidgets] = useState([])
+  const [fields, setFields] = useState([])
+
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false)
+  const [isEditingLayout, setIsEditingLayout] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [isFetchingCharts, setIsFetchingCharts] = useState(false)
+  const [serverRangeActive, setServerRangeActive] = useState(false)
+
+  const [menuOpenFor, setMenuOpenFor] = useState(null)
+  const [modalChart, setModalChart] = useState(null)
+  const [modalOpen, setModalOpen] = useState(false)
+  const closeBtnRef = useRef(null)
+
+  const [appliedFilters, setAppliedFilters] = useState([])
+  const [matchMode, setMatchMode] = useState('ALL')
+  const [fieldSearch, setFieldSearch] = useState('')
+  const [selectedField, setSelectedField] = useState(null)
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const id = searchParams.get('id')
@@ -750,7 +1113,19 @@ export default function ViewDashboard() {
   const [selectedField, setSelectedField] = useState(null)
   const selectedFieldMeta = useMemo(
     () => fields.find(f => f.filtered_column_name === selectedField) || null,
+    () => fields.find(f => f.filtered_column_name === selectedField) || null,
     [fields, selectedField]
+  )
+  const [chipSearch, setChipSearch] = useState('')
+  const [sortBy, setSortBy] = useState('AZ')
+  const [operator, setOperator] = useState('contains')
+  const [typedValue, setTypedValue] = useState('')
+  const [selectedValues, setSelectedValues] = useState(new Set())
+  const [rangeField, setRangeField] = useState('')
+  const [rangePreset, setRangePreset] = useState('All')
+  const [gridSort, setGridSort] = useState({})
+
+  // AI/chatbot (unchanged except payload dataset_name fix)
   )
   const [chipSearch, setChipSearch] = useState('')
   const [sortBy, setSortBy] = useState('AZ')
@@ -773,6 +1148,7 @@ export default function ViewDashboard() {
   const [kpis, setKpis] = useState([]);
   const [loadingDatasets, setLoadingDatasets] = useState(true);
   const [loadingDetails, setLoadingDetails] = useState(false);
+  const [loadingDetails, setLoadingDetails] = useState(false);
   const selectedNameRef = useRef("dataaaaa");
   const chatMessagesEndRef = useRef(null);
   const [secureDatasetName, setSecureDatasetName] = useState('')
@@ -781,14 +1157,26 @@ export default function ViewDashboard() {
   useEffect(() => { const close = () => setMenuOpenFor(null); document.addEventListener('click', close); return () => document.removeEventListener('click', close) }, [])
   useEffect(() => { if (!modalOpen) return; const onKey = e => { if (e.key === 'Escape') setModalOpen(false) }; document.addEventListener('keydown', onKey); return () => document.removeEventListener('keydown', onKey) }, [modalOpen])
   useEffect(() => { if (modalOpen && closeBtnRef.current) closeBtnRef.current.focus() }, [modalOpen])
+  const [secureDatasetName, setSecureDatasetName] = useState('')
 
+  // kebab outside click
+  useEffect(() => { const close = () => setMenuOpenFor(null); document.addEventListener('click', close); return () => document.removeEventListener('click', close) }, [])
+  useEffect(() => { if (!modalOpen) return; const onKey = e => { if (e.key === 'Escape') setModalOpen(false) }; document.addEventListener('keydown', onKey); return () => document.removeEventListener('keydown', onKey) }, [modalOpen])
+  useEffect(() => { if (modalOpen && closeBtnRef.current) closeBtnRef.current.focus() }, [modalOpen])
+
+  // ---------- STREAMING loadAll ----------
   // ---------- STREAMING loadAll ----------
   const loadAll = useCallback(async () => {
     if (!id || !token || !dbToken) {
       setError('Missing authentication or dashboard ID')
       setLoading(false)
       return
+      setError('Missing authentication or dashboard ID')
+      setLoading(false)
+      return
     }
+    setError(null)
+    setLoading(true)
     setError(null)
     setLoading(true)
 
@@ -1527,10 +1915,12 @@ export default function ViewDashboard() {
   function applyFieldFilters(chartData, filters, mode = "ALL") {
     if (!filters?.length) return chartData;
 
+
     const content = chartData?.data || {};
     const labels = Array.isArray(content.labels) ? content.labels : [];
     const datasets = Array.isArray(content.datasets) ? content.datasets : [];
     const xAxisCol = chartData?.x_axis || "";
+    const xAxisNorm = normalizeColName(xAxisCol);
     const xAxisNorm = normalizeColName(xAxisCol);
 
     if (!labels.length || !datasets.length) return chartData;
@@ -1542,9 +1932,16 @@ export default function ViewDashboard() {
 
         // X-axis match (normalized)
         if (colNorm && colNorm === xAxisNorm) {
+      const perFilter = filters.map((f) => {
+        const type = inferType(f.column);
+        const colNorm = normalizeColName(f.column);
+
+        // X-axis match (normalized)
+        if (colNorm && colNorm === xAxisNorm) {
           const cell = labels[rowIdx];
           return checkCondition({
             cell,
+            type,
             type,
             operator: f.operator,
             value: f.value,
@@ -1567,12 +1964,31 @@ export default function ViewDashboard() {
               value2: f.value2,
               ranges: f.ranges,
             });
+
+        // Y-series match (by indices)
+        const yIdxList = getYSeriesIndices(chartData, f.column);
+        if (yIdxList.length > 0) {
+          // If multiple series match this field, treat filter as passing if ANY of them satisfies the condition.
+          return yIdxList.some((i) => {
+            const cell = datasets[i]?.data?.[rowIdx];
+            return checkCondition({
+              cell,
+              type,
+              operator: f.operator,
+              value: f.value,
+              value2: f.value2,
+              ranges: f.ranges,
+            });
           });
         }
 
         // No match -> don’t kill the row for this filter
+
+        // No match -> don’t kill the row for this filter
         return true;
       });
+
+      return mode === "ALL" ? perFilter.every(Boolean) : perFilter.some(Boolean);
 
       return mode === "ALL" ? perFilter.every(Boolean) : perFilter.some(Boolean);
     });
@@ -1584,6 +2000,7 @@ export default function ViewDashboard() {
       data: keptIdx.map((i) => ds.data?.[i]),
     }));
 
+
     return {
       ...chartData,
       data: { ...chartData.data, labels: newLabels, datasets: newDatasets },
@@ -1591,11 +2008,18 @@ export default function ViewDashboard() {
   }
 
   const applyAllFilters = chartOrKpi => {
+  const applyAllFilters = chartOrKpi => {
     if (chartOrKpi?.chart_type) {
       let cd = chartOrKpi
       cd = applyFieldFilters(cd, appliedFilters, matchMode)
       return cd
+      let cd = chartOrKpi
+      cd = applyFieldFilters(cd, appliedFilters, matchMode)
+      return cd
     }
+    return chartOrKpi
+  }
+
     return chartOrKpi
   }
 
@@ -1605,9 +2029,17 @@ export default function ViewDashboard() {
 
     const target = normalizeColName(colName);
 
+    const out = new Map();
+    if (!colName) return out;
+
+    const target = normalizeColName(colName);
+
     for (const w of widgets) {
       if (w.type !== 'chart') continue;
+      if (w.type !== 'chart') continue;
       const cd = w.data;
+      if (!cd) continue;
+
       if (!cd) continue;
 
       const labels = cd?.data?.labels || [];
@@ -1617,7 +2049,14 @@ export default function ViewDashboard() {
 
       // X-axis values
       if (target && target === xNorm && Array.isArray(labels)) {
+      const xAxis = cd?.x_axis || '';
+      const xNorm = normalizeColName(xAxis);
+
+      // X-axis values
+      if (target && target === xNorm && Array.isArray(labels)) {
         for (const lbl of labels) {
+          const key = lbl == null ? '' : String(lbl);
+          out.set(key, (out.get(key) || 0) + 1);
           const key = lbl == null ? '' : String(lbl);
           out.set(key, (out.get(key) || 0) + 1);
         }
@@ -1630,9 +2069,19 @@ export default function ViewDashboard() {
         for (const v of arr) {
           const key = v == null ? '' : String(v);
           out.set(key, (out.get(key) || 0) + 1);
+
+      // Y-series values
+      const idxList = getYSeriesIndices(cd, colName);
+      idxList.forEach((i) => {
+        const arr = Array.isArray(ds?.[i]?.data) ? ds[i].data : [];
+        for (const v of arr) {
+          const key = v == null ? '' : String(v);
+          out.set(key, (out.get(key) || 0) + 1);
         }
       });
+      });
     }
+    return out;
     return out;
   }
 
@@ -1642,13 +2091,24 @@ export default function ViewDashboard() {
 
     const target = normalizeColName(colName);
 
+
+    const target = normalizeColName(colName);
+
     for (const w of widgets) {
+      if (w.type !== 'chart') continue;
       if (w.type !== 'chart') continue;
       const cd = w.data;
       if (!cd) continue;
 
+      if (!cd) continue;
+
       const labels = cd?.data?.labels || [];
       const ds = cd?.data?.datasets || [];
+      const xAxis = cd?.x_axis || '';
+      const xNorm = normalizeColName(xAxis);
+
+      // Numeric x-axis labels
+      if (target && target === xNorm && Array.isArray(labels)) {
       const xAxis = cd?.x_axis || '';
       const xNorm = normalizeColName(xAxis);
 
@@ -1665,9 +2125,16 @@ export default function ViewDashboard() {
       idxList.forEach((i) => {
         const arr = Array.isArray(ds?.[i]?.data) ? ds[i].data : [];
         for (const v of arr) {
+
+      // Numeric y-series values
+      const idxList = getYSeriesIndices(cd, colName);
+      idxList.forEach((i) => {
+        const arr = Array.isArray(ds?.[i]?.data) ? ds[i].data : [];
+        for (const v of arr) {
           const num = Number(v);
           if (isFinite(num)) out.push(num);
         }
+      });
       });
     }
     return out;
@@ -1679,8 +2146,17 @@ export default function ViewDashboard() {
       return l ? { ...w, layout: { ...w.layout, ...l } } : w
     }))
   }
+  const onLayoutChange = newLayout => {
+    setWidgets(prev => prev.map(w => {
+      const l = newLayout.find(n => n.i === w.key)
+      return l ? { ...w, layout: { ...w.layout, ...l } } : w
+    }))
+  }
 
   const saveLayout = async () => {
+    const { isConfirmed } = await Swal.fire({ title: 'Save Layout?', icon: 'question', showCancelButton: true, confirmButtonText: 'Save' })
+    if (!isConfirmed) return
+    setSaving(true)
     const { isConfirmed } = await Swal.fire({ title: 'Save Layout?', icon: 'question', showCancelButton: true, confirmButtonText: 'Save' })
     if (!isConfirmed) return
     setSaving(true)
@@ -1690,9 +2166,15 @@ export default function ViewDashboard() {
         widgets: widgets.map(w => ({
           key: w.key, type: w.type, id: w.id,
           layout: { x: w.layout.x, y: w.layout.y, w: w.layout.w, h: w.layout.h },
+        widgets: widgets.map(w => ({
+          key: w.key, type: w.type, id: w.id,
+          layout: { x: w.layout.x, y: w.layout.y, w: w.layout.w, h: w.layout.h },
         })),
       }
+      }
       const r = await fetch(`${authUrl.BASE_URL}/dataset/layout/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify(payload),
@@ -1700,7 +2182,15 @@ export default function ViewDashboard() {
       if (!r.ok) throw new Error(`Save failed: ${r.status}`)
       setIsEditingLayout(false)
       Swal.fire('Saved!', 'Layout updated.', 'success')
+      })
+      if (!r.ok) throw new Error(`Save failed: ${r.status}`)
+      setIsEditingLayout(false)
+      Swal.fire('Saved!', 'Layout updated.', 'success')
     } catch (err) {
+      console.error(err)
+      Swal.fire('Error', err.message || 'Failed to save layout', 'error')
+    } finally { setSaving(false) }
+  }
       console.error(err)
       Swal.fire('Error', err.message || 'Failed to save layout', 'error')
     } finally { setSaving(false) }
@@ -1712,7 +2202,15 @@ export default function ViewDashboard() {
       icon: 'warning', showCancelButton: true, confirmButtonText: 'Yes, delete it', cancelButtonText: 'Cancel',
     })
     if (!isConfirmed) return
+      title: 'Delete Dashboard?', text: `This will delete "${dashboardName}".`,
+      icon: 'warning', showCancelButton: true, confirmButtonText: 'Yes, delete it', cancelButtonText: 'Cancel',
+    })
+    if (!isConfirmed) return
     try {
+      const resp = await fetch(`${authUrl.BASE_URL}/dataset/delete/${id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } })
+      if (!resp.ok) throw new Error(`Status ${resp.status}`)
+      await Swal.fire('Deleted!', 'Your dashboard has been deleted.', 'success')
+      navigate('/dashboards')
       const resp = await fetch(`${authUrl.BASE_URL}/dataset/delete/${id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } })
       if (!resp.ok) throw new Error(`Status ${resp.status}`)
       await Swal.fire('Deleted!', 'Your dashboard has been deleted.', 'success')
@@ -1720,19 +2218,32 @@ export default function ViewDashboard() {
     } catch (err) {
       console.error('Delete failed:', err)
       Swal.fire('Error', 'Could not delete the dashboard.', 'error')
+      console.error('Delete failed:', err)
+      Swal.fire('Error', 'Could not delete the dashboard.', 'error')
     }
+  }
   }
 
   const toggleMenu = chartId => {
+  const toggleMenu = chartId => {
     if (isEditingLayout) {
+      Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'Save layout first', showConfirmButton: false, timer: 1500 })
+      return
       Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'Save layout first', showConfirmButton: false, timer: 1500 })
       return
     }
     setMenuOpenFor(prev => (prev === chartId ? null : chartId))
   }
+    setMenuOpenFor(prev => (prev === chartId ? null : chartId))
+  }
 
   const handleEditChart = chartId => { setMenuOpenFor(null); navigate(`/edit?datasetId=${encodeURIComponent(id)}&chartid=${encodeURIComponent(chartId)}`) }
+  const handleEditChart = chartId => { setMenuOpenFor(null); navigate(`/edit?datasetId=${encodeURIComponent(id)}&chartid=${encodeURIComponent(chartId)}`) }
 
+  const handleDeleteChart = async chartId => {
+    setMenuOpenFor(null)
+    const { isConfirmed } = await Swal.fire({ title: 'Delete chart?', text: 'This will permanently delete the chart.', icon: 'warning', showCancelButton: true, confirmButtonColor: '#d33', cancelButtonColor: '#3085d6', confirmButtonText: 'Yes, delete it!' })
+    if (!isConfirmed) return
   const handleDeleteChart = async chartId => {
     setMenuOpenFor(null)
     const { isConfirmed } = await Swal.fire({ title: 'Delete chart?', text: 'This will permanently delete the chart.', icon: 'warning', showCancelButton: true, confirmButtonColor: '#d33', cancelButtonColor: '#3085d6', confirmButtonText: 'Yes, delete it!' })
@@ -1744,18 +2255,35 @@ export default function ViewDashboard() {
       if (!response.ok) throw new Error(`Server responded ${response.status}`)
       setWidgets(prev => prev.filter(w => !(w.type === 'chart' && w.id === String(chartId))))
       Swal.fire('Deleted!', 'Your chart has been removed.', 'success')
+      const response = await fetch(`${authUrl.BASE_URL}/dataset/chart/${chartId}`, {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
+      })
+      if (!response.ok) throw new Error(`Server responded ${response.status}`)
+      setWidgets(prev => prev.filter(w => !(w.type === 'chart' && w.id === String(chartId))))
+      Swal.fire('Deleted!', 'Your chart has been removed.', 'success')
     } catch (err) {
+      console.error('Failed to delete chart:', err)
+      Swal.fire('Error', 'There was a problem deleting your chart.', 'error')
       console.error('Failed to delete chart:', err)
       Swal.fire('Error', 'There was a problem deleting your chart.', 'error')
     }
   }
+  }
 
+  const handleFilterChart = () => { setMenuOpenFor(null); setFilterPanelOpen(true) }
+  const handleMaximizeChart = chartObj => { setMenuOpenFor(null); setModalChart(chartObj); setModalOpen(true) }
   const handleFilterChart = () => { setMenuOpenFor(null); setFilterPanelOpen(true) }
   const handleMaximizeChart = chartObj => { setMenuOpenFor(null); setModalChart(chartObj); setModalOpen(true) }
 
   const handleExplainChart = async chartObj => {
     setExplainModalChart(chartObj); setExplainModalOpen(true); setExplainLoading(true); setExplainResponse(null); setExplainError(null)
+  const handleExplainChart = async chartObj => {
+    setExplainModalChart(chartObj); setExplainModalOpen(true); setExplainLoading(true); setExplainResponse(null); setExplainError(null)
     try {
+      const chartData = chartObj?.data || chartObj
+      const dataContent = chartData?.data || {}
+      const datasets = dataContent?.datasets || []
+      const labels = dataContent?.labels || []
       const chartData = chartObj?.data || chartObj
       const dataContent = chartData?.data || {}
       const datasets = dataContent?.datasets || []
@@ -1765,9 +2293,85 @@ export default function ViewDashboard() {
         chart_type: chartData?.chart_type || 'unknown',
         x_axis: chartData?.x_axis || '',
         y_axis: chartData?.y_axis || '',
+        title: chartData?.chart_title || 'Untitled Chart',
+        chart_type: chartData?.chart_type || 'unknown',
+        x_axis: chartData?.x_axis || '',
+        y_axis: chartData?.y_axis || '',
         dataset_name: dashboardName || `Dataset ${id}`,
         table_name: 'dashboard_data',
+        table_name: 'dashboard_data',
         data: datasets?.[0]?.data || [],
+        labels: labels || []
+      }
+      const response = await fetch('https://demo.techfinna.com/ai/explain_chart', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      })
+      if (!response.ok) throw new Error(`API request failed with status ${response.status}`)
+      const result = await response.json()
+      if (result.result && result.result.success) setExplainResponse(result.result.data)
+      else if (result.success) setExplainResponse(result.data)
+      else throw new Error(result.result?.errors || result.errors || 'API returned an error')
+    } catch (error) {
+      setExplainError(error.message || 'Failed to get AI explanation')
+    } finally { setExplainLoading(false) }
+  }
+
+  // AI chat handlers (unchanged core)
+  const handleSendMessage = async () => {
+    const inputElement = document.getElementById("aiInput")
+    const textToSend = inputElement.value.trim()
+    if (!textToSend) return
+    const userMessage = { id: Date.now().toString(), text: textToSend, isUser: true, timestamp: new Date() }
+    setChatMessages(prev => [...prev, userMessage])
+    inputElement.value = ""
+    setShowSuggestions(false)
+    setIsTyping(true)
+    try {
+      const token = localStorage.getItem("accessToken")
+      if (!token) { toast.error("Auth Error: No access token found."); return }
+      const dbToken = localStorage.getItem("db_token")
+      if (!dbToken) { toast.error("Auth Error: No DB token found."); return }
+      const payload = {
+        db_token: dbToken,
+        dataset_name: secureDatasetName || dashboardName || `Dashboard ${id}`,
+        dataset_id: id,
+        message: textToSend,
+      }
+      const response = await fetch("https://backend.techfinna.com/chat_with_ai/chat/", {
+        method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(payload),
+      })
+      const result = await response.json()
+      setIsTyping(false)
+      const aiMessage = {
+        id: (Date.now() + 1).toString(),
+        text: result?.data?.response || result?.reply || "No response from AI.",
+        isUser: false, timestamp: new Date(), aiResponse: result,
+      }
+      setChatMessages(prev => [...prev, aiMessage])
+    } catch (err) {
+      console.error("AI Chat error:", err)
+      setIsTyping(false)
+      setChatMessages(prev => [...prev, { id: (Date.now() + 1).toString(), text: "⚠️ Error contacting AI service.", isUser: false, timestamp: new Date() }])
+    }
+  }
+  const handleCreateChart = async (chartData) => {
+    if (!chartData || !token || !dbToken || !id) { toast.error("Missing required data to create chart"); return }
+    try {
+      const payload = {
+        db_token: dbToken,
+        dataset_id: parseInt(id, 10),
+        chart_title: `AI Generated ${chartData.chart_type.charAt(0).toUpperCase() + chartData.chart_type.slice(1)} Chart`,
+        chart_type: chartData.chart_type,
+        x_axis: chartData.x_axis,
+        y_axis: chartData.y_axis,
+      }
+      const response = await fetch(`${authUrl.BASE_URL}/dataset/create/chart/`, {
+        method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(payload),
+      })
+      if (!response.ok) throw new Error(`Failed to create chart: ${response.status}`)
+      const result = await response.json()
+      if (result.success) { toast.success("Chart created successfully!"); await loadAll() }
+      else throw new Error(result.message || "Failed to create chart")
         labels: labels || []
       }
       const response = await fetch('https://demo.techfinna.com/ai/explain_chart', {
@@ -1862,12 +2466,28 @@ export default function ViewDashboard() {
       const fCount = (distinctMap.get('false') || distinctMap.get('False') || 0) + (distinctMap.get('0') || 0) + (distinctMap.get('no') || distinctMap.get('No') || 0)
       const base = [{ key: 'true', label: 'true', c: tCount, isRange: false }, { key: 'false', label: 'false', c: fCount, isRange: false }]
       return base.filter(it => it.label.includes(chipSearch.toLowerCase()))
+    if (selectedType === 'number') {
+      let bins = computeNumericBins(numericValues, 12)
+      if (chipSearch) bins = bins.filter(b => b.label.toLowerCase().includes(chipSearch.toLowerCase()))
+      switch (sortBy) { case 'AZ': bins.sort((a, b) => a.start - b.start); break; case 'ZA': bins.sort((a, b) => b.start - a.start); break; case 'FREQ': bins.sort((a, b) => b.c - a.c || a.start - b.start); break; case 'RARE': bins.sort((a, b) => a.c - b.c || a.start - b.start); break }
+      return bins
+    } else if (selectedType === 'boolean') {
+      const tCount = (distinctMap.get('true') || distinctMap.get('True') || 0) + (distinctMap.get('1') || 0) + (distinctMap.get('yes') || distinctMap.get('Yes') || 0)
+      const fCount = (distinctMap.get('false') || distinctMap.get('False') || 0) + (distinctMap.get('0') || 0) + (distinctMap.get('no') || distinctMap.get('No') || 0)
+      const base = [{ key: 'true', label: 'true', c: tCount, isRange: false }, { key: 'false', label: 'false', c: fCount, isRange: false }]
+      return base.filter(it => it.label.includes(chipSearch.toLowerCase()))
     } else {
       let arr = Array.from(distinctMap.entries()).map(([v, c]) => ({ key: v, label: v, c, isRange: false }))
       if (chipSearch) arr = arr.filter(item => item.label.toLowerCase().includes(chipSearch.toLowerCase()))
       switch (sortBy) { case 'AZ': arr.sort((a, b) => a.label.localeCompare(b.label)); break; case 'ZA': arr.sort((a, b) => b.label.localeCompare(a.label)); break; case 'FREQ': arr.sort((a, b) => b.c - a.c || a.label.localeCompare(b.label)); break; case 'RARE': arr.sort((a, b) => a.c - b.c || a.label.localeCompare(b.label)); break }
       return arr
+      let arr = Array.from(distinctMap.entries()).map(([v, c]) => ({ key: v, label: v, c, isRange: false }))
+      if (chipSearch) arr = arr.filter(item => item.label.toLowerCase().includes(chipSearch.toLowerCase()))
+      switch (sortBy) { case 'AZ': arr.sort((a, b) => a.label.localeCompare(b.label)); break; case 'ZA': arr.sort((a, b) => b.label.localeCompare(a.label)); break; case 'FREQ': arr.sort((a, b) => b.c - a.c || a.label.localeCompare(b.label)); break; case 'RARE': arr.sort((a, b) => a.c - b.c || a.label.localeCompare(b.label)); break }
+      return arr
     }
+  }, [selectedType, numericValues, distinctMap, chipSearch, sortBy])
+
   }, [selectedType, numericValues, distinctMap, chipSearch, sortBy])
 
   useEffect(() => {
@@ -1877,14 +2497,27 @@ export default function ViewDashboard() {
     else setOperator('contains')
   }, [selectedField, selectedType])
 
+    setChipSearch(''); setSortBy('AZ'); setSelectedValues(new Set()); setTypedValue('')
+    if (selectedType === 'number') setOperator('=')
+    else if (selectedType === 'boolean') setOperator('=')
+    else setOperator('contains')
+  }, [selectedField, selectedType])
+
   const groupedFields = useMemo(() => {
+    const groups = { text: [], number: [], boolean: [], json: [], other: [] }
     const groups = { text: [], number: [], boolean: [], json: [], other: [] }
     for (const f of fields) {
       const cat = categorizeColumnType(f.column_type)
       if (cat === 'date') continue
       const entry = { name: f.column_name, key: f.filtered_column_name, type: f.column_type }
       groups[cat]?.push(entry)
+      const cat = categorizeColumnType(f.column_type)
+      if (cat === 'date') continue
+      const entry = { name: f.column_name, key: f.filtered_column_name, type: f.column_type }
+      groups[cat]?.push(entry)
     }
+    const match = s => s.toLowerCase().includes(fieldSearch.toLowerCase())
+    const filterGroup = arr => arr.filter(x => match(x.name) || match(x.key))
     const match = s => s.toLowerCase().includes(fieldSearch.toLowerCase())
     const filterGroup = arr => arr.filter(x => match(x.name) || match(x.key))
     return {
@@ -1895,8 +2528,17 @@ export default function ViewDashboard() {
       other: filterGroup(groups.other),
     }
   }, [fields, fieldSearch])
+    }
+  }, [fields, fieldSearch])
 
   const sectionMeta = [
+    { id: 'text', title: 'Text', dot: 'bg-rose-500', accent: 'rose' },
+    { id: 'number', title: 'Numeric', dot: 'bg-amber-500', accent: 'amber' },
+    { id: 'boolean', title: 'Boolean', dot: 'bg-emerald-500', accent: 'emerald' },
+    { id: 'json', title: 'JSON', dot: 'bg-indigo-500', accent: 'indigo' },
+    { id: 'other', title: 'Other', dot: 'bg-slate-500', accent: 'slate' },
+  ]
+  const rightBgByType = t => t === 'number' ? 'bg-amber-50/60' : t === 'boolean' ? 'bg-emerald-50/60' : t === 'json' ? 'bg-indigo-50/60' : t === 'other' ? 'bg-slate-50/60' : 'bg-rose-50/60'
     { id: 'text', title: 'Text', dot: 'bg-rose-500', accent: 'rose' },
     { id: 'number', title: 'Numeric', dot: 'bg-amber-500', accent: 'amber' },
     { id: 'boolean', title: 'Boolean', dot: 'bg-emerald-500', accent: 'emerald' },
@@ -1909,6 +2551,9 @@ export default function ViewDashboard() {
   const renderKpi = w => {
     const name = w?.data?.kpi_name || 'KPI'
     const value = w?.data?.value ?? w?.data?.raw_value ?? '—'
+  const renderKpi = w => {
+    const name = w?.data?.kpi_name || 'KPI'
+    const value = w?.data?.value ?? w?.data?.raw_value ?? '—'
     return (
       <div className="bg-white p-6 flex flex-col items-center justify-center border border-gray-200 rounded-xl shadow-sm h-full">
         <div className="text-xs tracking-wide font-medium text-gray-500 uppercase">{name}</div>
@@ -1917,9 +2562,26 @@ export default function ViewDashboard() {
     )
   }
 
+        <div className="text-xs tracking-wide font-medium text-gray-500 uppercase">{name}</div>
+        <div className="mt-1.5 text-3xl font-semibold text-gray-900">{value}</div>
+      </div>
+    )
+  }
+
   const sortGridRows = (labels, series, colIdx, dir) => {
     if (colIdx == null || !dir) return { labels, series }
+    if (colIdx == null || !dir) return { labels, series }
     const rows = labels.map((_, r) => {
+      const cell = series[colIdx]?.data?.[r]
+      const num = Number(cell)
+      return { r, v: isNaN(num) ? String(cell ?? '') : num }
+    })
+    rows.sort((a, b) => dir === 'asc' ? (a.v > b.v ? 1 : a.v < b.v ? -1 : 0) : (a.v < b.v ? 1 : a.v > b.v ? -1 : 0))
+    const mapIndex = rows.map(x => x.r)
+    const newLabels = mapIndex.map(i => labels[i])
+    const newSeries = series.map(ds => ({ ...ds, data: mapIndex.map(i => ds.data?.[i]) }))
+    return { labels: newLabels, series: newSeries }
+  }
       const cell = series[colIdx]?.data?.[r]
       const num = Number(cell)
       return { r, v: isNaN(num) ? String(cell ?? '') : num }
@@ -1950,10 +2612,34 @@ export default function ViewDashboard() {
       if (!sort || sort.col !== colIdx || !sort.dir) return <FaSort className="inline-block ml-1 opacity-50" />
       return sort.dir === 'asc' ? <FaSortUp className="inline-block ml-1" /> : <FaSortDown className="inline-block ml-1" />
     }
+  const renderGridTable = w => {
+    const chart = w
+    const labels = Array.isArray(chart?.data?.data?.labels) ? chart.data.data.labels : []
+    const series = Array.isArray(chart?.data?.data?.datasets) ? chart.data.data.datasets : []
+    const cols = (chart?.data?.y_axis || '').toString().split(',').map(s => s.trim()).filter(Boolean)
+    const sort = gridSort[w.key] || { col: null, dir: null }
+    const { labels: sortedLabels, series: sortedSeries } = sortGridRows(labels, series, sort.col, sort.dir)
+    const toggleSort = colIdx => {
+      setGridSort(prev => {
+        const cur = prev[w.key] || { col: null, dir: null }
+        let dir = 'asc'
+        if (cur.col === colIdx) dir = cur.dir === 'asc' ? 'desc' : cur.dir === 'desc' ? null : 'asc'
+        return { ...prev, [w.key]: { col: dir ? colIdx : null, dir } }
+      })
+    }
+    const sortIcon = colIdx => {
+      if (!sort || sort.col !== colIdx || !sort.dir) return <FaSort className="inline-block ml-1 opacity-50" />
+      return sort.dir === 'asc' ? <FaSortUp className="inline-block ml-1" /> : <FaSortDown className="inline-block ml-1" />
+    }
     return (
       <div className="overflow-auto h-full">
         <table className="min-w-full table-auto text-xs border-collapse">
           <thead>
+            <tr>{cols.map((c, i) => (
+              <th key={c} className="border px-2 py-1 bg-gray-50 font-medium text-left cursor-pointer select-none" onClick={() => toggleSort(i)} title="Sort">
+                {c} {sortIcon(i)}
+              </th>
+            ))}</tr>
             <tr>{cols.map((c, i) => (
               <th key={c} className="border px-2 py-1 bg-gray-50 font-medium text-left cursor-pointer select-none" onClick={() => toggleSort(i)} title="Sort">
                 {c} {sortIcon(i)}
@@ -1964,11 +2650,14 @@ export default function ViewDashboard() {
             {sortedLabels.map((_, rIdx) => (
               <tr key={rIdx} className="odd:bg-white even:bg-gray-50">
                 {sortedSeries.map((ds, cIdx) => (<td key={cIdx} className="border px-2 py-1">{ds?.data?.[rIdx] ?? ''}</td>))}
+                {sortedSeries.map((ds, cIdx) => (<td key={cIdx} className="border px-2 py-1">{ds?.data?.[rIdx] ?? ''}</td>))}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+    )
+  }
     )
   }
 
@@ -1978,10 +2667,22 @@ export default function ViewDashboard() {
 
     const t = String(w?.data?.chart_type || '').toLowerCase()
     if (t === 'grid') return renderGridTable(w)
+    if (!w?.data) return <div className="h-full w-full grid place-items-center"><div className="text-xs text-gray-400">Loading chart…</div></div>
+    if (w?.data?.error) return <div className="h-full w-full grid place-items-center text-sm text-red-600">Failed to load</div>
+
+    const t = String(w?.data?.chart_type || '').toLowerCase()
+    if (t === 'grid') return renderGridTable(w)
 
     const labels = Array.isArray(w?.data?.data?.labels) ? w.data.data.labels : []
     const isTs = (t === 'line' || t === 'multi_line' || t === 'area' || t === 'areaspline') && labelsLookLikeDates(labels)
     const constructorType = t === 'worldmap' ? 'mapChart' : isTs ? 'stockChart' : 'chart'
+    const labels = Array.isArray(w?.data?.data?.labels) ? w.data.data.labels : []
+    const isTs = (t === 'line' || t === 'multi_line' || t === 'area' || t === 'areaspline') && labelsLookLikeDates(labels)
+    const constructorType = t === 'worldmap' ? 'mapChart' : isTs ? 'stockChart' : 'chart'
+
+    const options = buildChartOptions({ chart_type: w?.data?.chart_type, data: w?.data, x_axis: w?.data?.x_axis, y_axis: w?.data?.y_axis }, idx, isTs)
+    return <SmartChart options={options} constructorType={constructorType} minHeight={forModal ? 240 : 120} />
+  }
 
     const options = buildChartOptions({ chart_type: w?.data?.chart_type, data: w?.data, x_axis: w?.data?.x_axis, y_axis: w?.data?.y_axis }, idx, isTs)
     return <SmartChart options={options} constructorType={constructorType} minHeight={forModal ? 240 : 120} />
@@ -1998,9 +2699,33 @@ export default function ViewDashboard() {
       return chartHasData(w.data)                // show only charts that have data
     })
   }, [widgets, appliedFilters, matchMode])
+    const mapped = widgets.map(w =>
+      w.type === 'chart' ? { ...w, data: applyAllFilters(w.data) } : w
+    )
+    return mapped.filter(w => {
+      if (w.type !== 'chart') return true
+      if (w.data == null) return true            // keep placeholder while loading
+      if (w.data?.error) return true             // keep visible if it failed
+      return chartHasData(w.data)                // show only charts that have data
+    })
+  }, [widgets, appliedFilters, matchMode])
 
   // Replace your current addChipFilter with this version
+  // Replace your current addChipFilter with this version
   const addChipFilter = () => {
+    if (!selectedField) return
+
+    const t = selectedType
+    const isNumberish = t === 'number' || (t === 'other' && NUM_OPS.includes(operator))
+    const isTextish = t === 'text' || (t === 'other' && !NUM_OPS.includes(operator))
+    const hasChipSel = selectedValues.size > 0
+    const tyVal = (typedValue ?? '').trim()
+
+    // NUMBER (or "other" with numeric operator)
+    if (isNumberish) {
+      if (t === 'number' && hasChipSel) {
+        // Chip-selected numeric ranges -> in_ranges
+        const chosenBins = chipItems.filter(it => selectedValues.has(it.key))
     if (!selectedField) return
 
     const t = selectedType
@@ -2017,7 +2742,12 @@ export default function ViewDashboard() {
         if (chosenBins.length > 0) {
           const ranges = chosenBins.map(b => ({ start: b.start, end: b.end }))
           setAppliedFilters(fs => [...fs, { column: selectedField, operator: 'in_ranges', ranges }])
+          const ranges = chosenBins.map(b => ({ start: b.start, end: b.end }))
+          setAppliedFilters(fs => [...fs, { column: selectedField, operator: 'in_ranges', ranges }])
         }
+      } else if (tyVal !== '') {
+        // Typed numeric value with =, !=, >, <
+        const v = Number(tyVal)
       } else if (tyVal !== '') {
         // Typed numeric value with =, !=, >, <
         const v = Number(tyVal)
@@ -2053,7 +2783,40 @@ export default function ViewDashboard() {
     setSelectedValues(new Set())
     setTypedValue('')
   }
+          setAppliedFilters(fs => [...fs, { column: selectedField, operator, value: v }])
+        }
+      }
+    }
+    // BOOLEAN
+    else if (t === 'boolean') {
+      if (hasChipSel) {
+        // Chips true/false -> in
+        const val = Array.from(selectedValues).join(', ')
+        setAppliedFilters(fs => [...fs, { column: selectedField, operator: 'in', value: val }])
+      } else if (tyVal) {
+        // Typed "true"/"false" with = or != (or in/not_in)
+        setAppliedFilters(fs => [...fs, { column: selectedField, operator, value: tyVal }])
+      }
+    }
+    // TEXT (or "other" with text operator)
+    else if (isTextish) {
+      if (hasChipSel) {
+        // Multiple selected chips -> IN
+        const val = Array.from(selectedValues).join(', ')
+        setAppliedFilters(fs => [...fs, { column: selectedField, operator: 'in', value: val }])
+      } else if (tyVal) {
+        // Typed value with contains / not_contains / begins_with / ends_with / in / not_in / = / !=
+        setAppliedFilters(fs => [...fs, { column: selectedField, operator, value: tyVal }])
+      }
+    }
 
+    // reset selections / input after apply
+    setSelectedValues(new Set())
+    setTypedValue('')
+  }
+
+  const removeFilter = idx => setAppliedFilters(fs => fs.filter((_, i) => i !== idx))
+  const handlePresetClick = async preset => { if (!rangeField && preset !== 'All') return; setRangePreset(preset); await refetchChartsForPreset(rangeField, preset) }
   const removeFilter = idx => setAppliedFilters(fs => fs.filter((_, i) => i !== idx))
   const handlePresetClick = async preset => { if (!rangeField && preset !== 'All') return; setRangePreset(preset); await refetchChartsForPreset(rangeField, preset) }
 
@@ -2067,10 +2830,22 @@ export default function ViewDashboard() {
   // ---------- render return continues in Part 3 ----------
 
   // Loading + error gates
+  // explain chart modal state (unchanged)
+  const [explainModalOpen, setExplainModalOpen] = useState(false)
+  const [explainModalChart, setExplainModalChart] = useState(null)
+  const [explainLoading, setExplainLoading] = useState(false)
+  const [explainResponse, setExplainResponse] = useState(null)
+  const [explainError, setExplainError] = useState(null)
+
+  // ---------- render return continues in Part 3 ----------
+
+  // Loading + error gates
   if (loading) {
+    return (<><Navbar /><div className="mt-[55px] h-[calc(100vh-55px)] flex items-center justify-center text-gray-500">Loading dashboard…</div></>)
     return (<><Navbar /><div className="mt-[55px] h-[calc(100vh-55px)] flex items-center justify-center text-gray-500">Loading dashboard…</div></>)
   }
   if (error) {
+    return (<><Navbar /><div className="mt-[55px] p-6 text-red-600">{error}</div></>)
     return (<><Navbar /><div className="mt-[55px] p-6 text-red-600">{error}</div></>)
   }
 
@@ -2084,6 +2859,8 @@ export default function ViewDashboard() {
           <button
             className={`p-2 rounded-lg transition hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 ${filterPanelOpen ? 'bg-gray-200' : ''}`}
             onClick={() => setFilterPanelOpen(v => !v)}
+            className={`p-2 rounded-lg transition hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 ${filterPanelOpen ? 'bg-gray-200' : ''}`}
+            onClick={() => setFilterPanelOpen(v => !v)}
             title="Filters"
           >
             <RiFilter2Line size={20} className="text-gray-700" />
@@ -2093,6 +2870,7 @@ export default function ViewDashboard() {
 
         <div className="flex flex-col items-center">
           <button
+            onClick={() => navigate(`/chart?datasetId=${encodeURIComponent(id)}`)}
             onClick={() => navigate(`/chart?datasetId=${encodeURIComponent(id)}`)}
             className="p-2 rounded-lg hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
             title="Add Chart"
@@ -2108,16 +2886,23 @@ export default function ViewDashboard() {
             onClick={() => setIsEditingLayout(true)}
             className={`p-2 rounded-lg hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition ${isEditingLayout ? 'bg-gray-200 opacity-60 cursor-not-allowed' : ''}`}
             title={isEditingLayout ? 'Save layout first' : 'Edit Layout'}
+            className={`p-2 rounded-lg hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition ${isEditingLayout ? 'bg-gray-200 opacity-60 cursor-not-allowed' : ''}`}
+            title={isEditingLayout ? 'Save layout first' : 'Edit Layout'}
             aria-disabled={isEditingLayout}
           >
             <RxDragHandleDots2 size={20} className="text-gray-700" />
           </button>
           <span className="text-[10px] mt-1 text-gray-600">{isEditingLayout ? 'Editing…' : 'Edit Layout'}</span>
+          <span className="text-[10px] mt-1 text-gray-600">{isEditingLayout ? 'Editing…' : 'Edit Layout'}</span>
         </div>
+
+        {/* AI Chat */}
 
         {/* AI Chat */}
         <div className="flex flex-col items-center">
           <button
+            onClick={() => setActivePanel(prev => prev === "chatbot" ? null : "chatbot")}
+            className={`p-2 rounded hover:bg-gray-200 ${activePanel === "chatbot" ? "bg-gray-200" : ""}`}
             onClick={() => setActivePanel(prev => prev === "chatbot" ? null : "chatbot")}
             className={`p-2 rounded hover:bg-gray-200 ${activePanel === "chatbot" ? "bg-gray-200" : ""}`}
             title="AI Chatbot"
@@ -2129,6 +2914,7 @@ export default function ViewDashboard() {
 
         <div className="flex flex-col items-center">
           <button onClick={deleteDashboard} className="p-2 rounded-lg hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-rose-500 transition" title="Delete Dashboard">
+          <button onClick={deleteDashboard} className="p-2 rounded-lg hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-rose-500 transition" title="Delete Dashboard">
             <FiTrash2 size={20} className="text-gray-700" />
           </button>
           <span className="text-[10px] mt-1 text-gray-600">Delete</span>
@@ -2138,232 +2924,114 @@ export default function ViewDashboard() {
         {isEditingLayout && (
           <div className="flex flex-col items-center pb-3">
             <button disabled={saving} onClick={saveLayout} className="p-2 rounded-lg hover:bg-gray-200 disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-blue-500 transition" title="Save Layout">
+            <button disabled={saving} onClick={saveLayout} className="p-2 rounded-lg hover:bg-gray-200 disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-blue-500 transition" title="Save Layout">
               <FiSave size={20} className="text-gray-800" />
             </button>
+            <span className="text-[10px] mt-1 text-gray-700">{saving ? 'Saving…' : 'Save'}</span>
             <span className="text-[10px] mt-1 text-gray-700">{saving ? 'Saving…' : 'Save'}</span>
           </div>
         )}
       </aside>
 
       {activePanel && (
-        <div
-          className="fixed w-[320px] left-[70px] h-[500px] z-30 top-[60px] rounded-lg overflow-hidden drop-shadow-xl flex bg-black bg-opacity-25"
-          onClick={() => setActivePanel(null)}
-        >
-          <div
-            className="bg-white border border-gray-200 text-gray-600 w-full max-h-[500px] overflow-y-auto scrollsettings rounded-lg"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <div className="fixed w-[320px] left-[70px] h-[500px] z-30 top-[60px] rounded-lg overflow-hidden drop-shadow-xl flex bg-black bg-opacity-25" onClick={() => setActivePanel(null)}>
+          <div className="bg-white border border-gray-200 text-gray-600 w-full max-h-[500px] overflow-y-auto scrollsettings rounded-lg" onClick={(e) => e.stopPropagation()}>
             {/* Header */}
             <div className="flex items-center justify-between p-4 border-b border-gray-200">
               <p className="text-lg font-medium text-gray-800">
-                {activePanel === "dataset" && "Datasets"}
                 {activePanel === "chatbot" && (
-                  <>
-                    {" "}
-                    <div className="flex items-center space-x-2">
-                      <div className="w-6 h-6 bg-gray-200 rounded-full flex items-center justify-center">
-                        <FiMessageSquare className="text-gray-600 text-xs" />
-                      </div>
-                      <span className="text-md font-medium text-gray-600">
-                        AI Assistant
-                      </span>
+                  <div className="flex items-center space-x-2">
+                    <div className="w-6 h-6 bg-gray-200 rounded-full flex items-center justify-center">
+                      <FiMessageSquare className="text-gray-600 text-xs" />
                     </div>
-                  </>
+                    <span className="text-md font-medium text-gray-600">AI Assistant</span>
+                  </div>
                 )}
               </p>
-              <button
-                onClick={() => setActivePanel(null)}
-                className="p-1 rounded hover:bg-gray-200"
-                title="Close"
-              >
+              <button onClick={() => setActivePanel(null)} className="p-1 rounded hover:bg-gray-200" title="Close">
                 <FiX size={20} />
               </button>
             </div>
-            {/* Content list */}
+
+            {/* Chat content */}
             <div className="p-2">
-              {activePanel === "dataset" && (
-                <div className="space-y-2">
-                  {loadingDatasets ? (
+              <div className="flex flex-col h-full">
+                {showSuggestions && chatMessages.length === 0 && (
+                  <div className="p-4 space-y-4">
+                    <div className="space-y-3 text-sm text-gray-600 leading-relaxed">
+                      <p>Ask me anything about your data, charts, or KPIs to get started!</p>
+                    </div>
+
                     <div className="space-y-2">
-                      {Array.from({ length: 10 }).map((_, i) => (
-                        <div
-                          key={i}
-                          className="h-5 bg-gray-200 rounded animate-pulse"
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    datasets.map((ds) => (
-                      <div
-                        key={ds.id}
-                        onClick={() => changeDataset(ds.id)}
-                        className={`px-2 py-2 cursor-pointer flex justify-between items-center rounded hover:bg-gray-100 ${
-                          selectedId === ds.id
-                            ? "bg-gray-100 text-gray-800"
-                            : "text-gray-800"
-                        }`}
-                      >
-                        <span className="truncate">{ds.name}</span>
-                        <button
-                          onClick={(e) => handleDeleteDataset(ds, e)}
-                          className="p-1 hover:text-red-500"
-                          title={`Delete ${ds.name}`}
-                        >
-                          <FiTrash2 size={16} />
-                        </button>
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-              {activePanel === "chatbot" && (
-                <div className="flex flex-col h-full">
-                  {/* Welcome Message and Suggestions */}
-                  {showSuggestions && chatMessages.length === 0 && (
-                    <div className="p-4 space-y-4">
-                      {/* Welcome Section */}
-                      <div className="space-y-3">
-                        <div className="space-y-3 text-sm text-gray-600 leading-relaxed">
-                          <p>
-                            Ask me anything about your data, charts, or KPIs to
-                            get started!
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Suggestion Buttons */}
-                      <div className="space-y-2">
-                        <button
-                          onClick={() =>
-                            handleSuggestionClick(
-                              "Can you explain me the charts in my dataset?"
-                            )
-                          }
-                          className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors"
-                        >
-                          <span className="text-sm text-gray-700">
-                            Can you explain me the charts in my dataset?
-                          </span>
-                        </button>
-
-                        <button
-                          onClick={() =>
-                            handleSuggestionClick(
-                              "Please generate a chart for me."
-                            )
-                          }
-                          className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors"
-                        >
-                          <span className="text-sm text-gray-700">
-                            Please generate a chart for me.
-                          </span>
-                        </button>
-
-                        <button
-                          onClick={() =>
-                            handleSuggestionClick(
-                              "How do I add more data to my dataset?"
-                            )
-                          }
-                          className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors"
-                        >
-                          <span className="text-sm text-gray-700">
-                            How do I add more data to my dataset?
-                          </span>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Chat Messages */}
-                  {chatMessages.length > 0 && (
-                    <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-[200px] max-h-[300px]">
-                      {chatMessages.map((message) => (
-                        <div
-                          key={message.id}
-                          className={`flex ${
-                            message.isUser
-                              ? "justify-end"
-                              : "items-start space-x-2"
-                          }`}
-                        >
-                          {!message.isUser && (
-                            <div className="w-6 h-6 bg-gray-200 rounded-full flex items-center justify-center flex-shrink-0 mt-1">
-                              <FiMessageSquare className="text-gray-600 text-xs" />
-                            </div>
-                          )}
-                          <div
-                            className={`rounded-xl p-3 max-w-[85%] text-sm ${
-                              message.isUser
-                                ? "bg-gray-700 text-white"
-                                : "bg-gray-50 text-gray-700 border border-gray-200"
-                            }`}
-                          >
-                            {message.isUser ? (
-                              <p className="leading-relaxed">{message.text}</p>
-                            ) : (
-                              renderAIMessage(message)
-                            )}
-                          </div>
-                        </div>
-                      ))}
-
-                      {/* Typing Indicator */}
-                      {isTyping && (
-                        <div className="flex items-start space-x-2">
-                          <div className="w-6 h-6 bg-gray-200 rounded-full flex items-center justify-center flex-shrink-0 mt-1">
-                            <FiMessageSquare className="text-gray-600 text-xs" />
-                          </div>
-                          <div className="bg-gray-50 rounded-xl border border-gray-200 p-3">
-                            <div className="flex items-center space-x-2">
-                              <div className="flex space-x-1">
-                                <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"></div>
-                                <div
-                                  className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"
-                                  style={{ animationDelay: "0.2s" }}
-                                ></div>
-                                <div
-                                  className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"
-                                  style={{ animationDelay: "0.4s" }}
-                                ></div>
-                              </div>
-                              <span className="text-xs text-gray-500">
-                                AI is thinking...
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Scroll anchor */}
-                      <div ref={chatMessagesEndRef} />
-                    </div>
-                  )}
-
-                  {/* Chat Input */}
-                  <div className="p-4 border-t border-gray-200 bg-white">
-                    <div className="flex space-x-2">
-                      <input
-                        type="text"
-                        id="aiInput"
-                        // value={chatInput}
-                        onKeyPress={handleKeyPress}
-                        onChange={(e) => checkState(e.target.value)}
-                        placeholder="Ask a question or request..."
-                        className="flex-1 px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm bg-gray-50"
-                      />
-
-                      <button
-                        onClick={handleSendMessage}
-                        className="px-4 py-3 bg-gray-700 text-white rounded-xl hover:bg-gray-800 transition-colors focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <FiSend className="text-sm" />
+                      <button onClick={() => handleSuggestionClick("Can you explain me the charts in my dataset?")} className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors">
+                        <span className="text-sm text-gray-700">Can you explain me the charts in my dataset?</span>
+                      </button>
+                      <button onClick={() => handleSuggestionClick("Please generate a chart for me.")} className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors">
+                        <span className="text-sm text-gray-700">Please generate a chart for me.</span>
+                      </button>
+                      <button onClick={() => handleSuggestionClick("How do I add more data to my dataset?")} className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors">
+                        <span className="text-sm text-gray-700">How do I add more data to my dataset?</span>
                       </button>
                     </div>
                   </div>
+                )}
+
+                {chatMessages.length > 0 && (
+                  <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-[200px] max-h-[300px]">
+                    {chatMessages.map((message) => (
+                      <div key={message.id} className={`flex ${message.isUser ? "justify-end" : "items-start space-x-2"}`}>
+                        {!message.isUser && (
+                          <div className="w-6 h-6 bg-gray-200 rounded-full flex items-center justify-center flex-shrink-0 mt-1">
+                            <FiMessageSquare className="text-gray-600 text-xs" />
+                          </div>
+                        )}
+                        <div className={`rounded-xl p-3 max-w-[85%] text-sm ${message.isUser ? "bg-gray-700 text-white" : "bg-gray-50 text-gray-700 border border-gray-200"}`}>
+                          {message.isUser ? <p className="leading-relaxed">{message.text}</p> : <p className="leading-relaxed">{message.text}</p>}
+                        </div>
+                      </div>
+                    ))}
+                    {isTyping && (
+                      <div className="flex items-start space-x-2">
+                        <div className="w-6 h-6 bg-gray-200 rounded-full flex items-center justify-center flex-shrink-0 mt-1">
+                          <FiMessageSquare className="text-gray-600 text-xs" />
+                        </div>
+                        <div className="bg-gray-50 rounded-xl border border-gray-200 p-3">
+                          <div className="flex items-center space-x-2">
+                            <div className="flex space-x-1">
+                              <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"></div>
+                              <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse" style={{ animationDelay: "0.2s" }}></div>
+                              <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse" style={{ animationDelay: "0.4s" }}></div>
+                            </div>
+                            <span className="text-xs text-gray-500">AI is thinking...</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    <div ref={chatMessagesEndRef} />
+                  </div>
+                )}
+
+                <div className="p-4 border-t border-gray-200 bg-white">
+                  <div className="flex space-x-2">
+                    <input type="text" id="aiInput" onKeyPress={handleKeyPress} placeholder="Ask a question or request..." className="flex-1 px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm bg-gray-50" />
+                    <button onClick={handleSendMessage} className="px-4 py-3 bg-gray-700 text-white rounded-xl hover:bg-gray-800 transition-colors focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed">
+                      <FiSend className="text-sm" />
+                    </button>
+                  </div>
                 </div>
-              )}
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* Top bar */}
+      <div className="pl-[60px] pt-[55px]">
+        <div className="sticky top-[55px] bg-white/90 backdrop-blur z-20 border-b px-4 py-3">
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <h1 className="text-2xl font-semibold tracking-tight text-gray-900">{dashboardName}</h1>
             </div>
           </div>
         </div>
@@ -2535,6 +3203,10 @@ export default function ViewDashboard() {
                               ? `bg-${sec.accent}-50 border-${sec.accent}-200`
                               : "bg-white border-gray-200 hover:bg-gray-50"
                               }`}
+                            className={`w-full flex justify-between items-center px-3 py-2 rounded-xl border text-sm ${selectedField === f.key
+                              ? `bg-${sec.accent}-50 border-${sec.accent}-200`
+                              : "bg-white border-gray-200 hover:bg-gray-50"
+                              }`}
                           >
                             <div className="flex items-center gap-2">
                               <span
@@ -2609,6 +3281,10 @@ export default function ViewDashboard() {
                             : selectedType === "other"
                               ? [...TEXT_OPS, ...NUM_OPS]
                               : TEXT_OPS
+                            ? BOOL_OPS
+                            : selectedType === "other"
+                              ? [...TEXT_OPS, ...NUM_OPS]
+                              : TEXT_OPS
                         ).map((op) => (
                           <option key={op} value={op}>
                             {prettyOp(op)}
@@ -2626,8 +3302,12 @@ export default function ViewDashboard() {
                             selectedType === "number" ||
                               (selectedType === "other" &&
                                 NUM_OPS.includes(operator))
+                              (selectedType === "other" &&
+                                NUM_OPS.includes(operator))
                               ? "Type a number"
                               : operator === "in" || operator === "not_in"
+                                ? "Comma separated values"
+                                : "Type a value"
                                 ? "Comma separated values"
                                 : "Type a value"
                           }
@@ -2653,6 +3333,10 @@ export default function ViewDashboard() {
                             else next.add(item.key);
                             setSelectedValues(next);
                           }}
+                          className={`px-3 py-1.5 rounded-xl text-sm border flex items-center gap-1 transition ${active
+                            ? "bg-blue-50 border-blue-400 shadow-sm"
+                            : "bg-white/80 border-gray-300 hover:bg-white"
+                            }`}
                           className={`px-3 py-1.5 rounded-xl text-sm border flex items-center gap-1 transition ${active
                             ? "bg-blue-50 border-blue-400 shadow-sm"
                             : "bg-white/80 border-gray-300 hover:bg-white"
@@ -2719,7 +3403,13 @@ export default function ViewDashboard() {
                           (r) => `${fmtNumber(r.start)}–${fmtNumber(r.end)}`
                         )
                         .join(" or ")}`
+                        .map(
+                          (r) => `${fmtNumber(r.start)}–${fmtNumber(r.end)}`
+                        )
+                        .join(" or ")}`
                       : ["is_empty", "is_not_empty"].includes(f.operator)
+                        ? ""
+                        : ` ${String(f.value ?? "")}`}
                         ? ""
                         : ` ${String(f.value ?? "")}`}
                     <button
@@ -2756,20 +3446,25 @@ export default function ViewDashboard() {
       {explainModalOpen && explainModalChart && (
         <div className="fixed inset-0 bg-black/20 z-[100] flex items-center justify-center p-4" onClick={() => setExplainModalOpen(false)} role="dialog" aria-modal="true" aria-label="AI Explanation">
           <div className="bg-white w-[600px] max-h-[80vh] rounded-xl shadow-2xl overflow-hidden relative border" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/20 z-[100] flex items-center justify-center p-4" onClick={() => setExplainModalOpen(false)} role="dialog" aria-modal="true" aria-label="AI Explanation">
+          <div className="bg-white w-[600px] max-h-[80vh] rounded-xl shadow-2xl overflow-hidden relative border" onClick={e => e.stopPropagation()}>
             <div className="h-12 px-4 border-b bg-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <RiRobot2Line size={18} className="text-blue-600" />
                 <span className="font-medium">AI Explanation</span>
               </div>
               <button className="p-1.5 rounded-md hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500" onClick={() => setExplainModalOpen(false)} aria-label="Close">
+              <button className="p-1.5 rounded-md hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500" onClick={() => setExplainModalOpen(false)} aria-label="Close">
                 <FiX size={16} />
               </button>
             </div>
             <div className="p-4 overflow-auto max-h-[calc(80vh-3rem)]">
               {explainLoading && (<div className="flex items-center justify-center py-8"><div className="text-sm text-gray-600">Analyzing chart with AI...</div></div>)}
+              {explainLoading && (<div className="flex items-center justify-center py-8"><div className="text-sm text-gray-600">Analyzing chart with AI...</div></div>)}
               {explainError && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-4">
                   <div className="text-red-800 text-sm font-medium">Error</div>
+                  <div className="text-red-700 text-sm mt-1">{explainError}</div>
                   <div className="text-red-700 text-sm mt-1">{explainError}</div>
                 </div>
               )}
@@ -2792,8 +3487,27 @@ export default function ViewDashboard() {
                       ))}</ul>
                     </div>
                   )}
+                  <div><h3 className="font-semibold text-gray-900 mb-2">Analysis</h3><p className="text-sm text-gray-700">{explainResponse.response}</p></div>
+                  {explainResponse.business_value?.length > 0 && (
+                    <div>
+                      <h3 className="font-semibold text-gray-900 mb-2">Business Value</h3>
+                      <ul className="space-y-1">{explainResponse.business_value.map((v, i) => (
+                        <li key={i} className="text-sm text-gray-700 flex items-start gap-2"><span className="text-green-600 mt-1">•</span><span>{v}</span></li>
+                      ))}</ul>
+                    </div>
+                  )}
+                  {explainResponse.suggestions?.length > 0 && (
+                    <div>
+                      <h3 className="font-semibold text-gray-900 mb-2">Suggestions</h3>
+                      <ul className="space-y-1">{explainResponse.suggestions.map((s, i) => (
+                        <li key={i} className="text-sm text-gray-700 flex items-start gap-2"><span className="text-blue-600 mt-1">•</span><span>{s}</span></li>
+                      ))}</ul>
+                    </div>
+                  )}
                   {explainResponse.caveat && (
                     <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                      <div className="text-yellow-800 text-xs font-medium uppercase tracking-wide">Caveat</div>
+                      <div className="text-yellow-700 text-sm mt-1">{explainResponse.caveat}</div>
                       <div className="text-yellow-800 text-xs font-medium uppercase tracking-wide">Caveat</div>
                       <div className="text-yellow-700 text-sm mt-1">{explainResponse.caveat}</div>
                     </div>
@@ -2805,5 +3519,6 @@ export default function ViewDashboard() {
         </div>
       )}
     </>
+  )
   )
 }
