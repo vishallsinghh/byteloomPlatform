@@ -1770,8 +1770,8 @@ export default function ViewDashboard() {
         data: datasets?.[0]?.data || [],
         labels: labels || []
       }
-      const response = await fetch('https://demo.techfinna.com/ai/explain_chart', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      const response = await fetch(`${authUrl.BASE_URL}/explain_with_ai/explain_chart/`, {
+        method: 'POST', headers: {'Content-Type': 'application/json','Authorization': `Bearer ${token}`}, body: JSON.stringify(payload),
       })
       if (!response.ok) throw new Error(`API request failed with status ${response.status}`)
       const result = await response.json()
@@ -1811,7 +1811,7 @@ export default function ViewDashboard() {
       setIsTyping(false)
       const aiMessage = {
         id: (Date.now() + 1).toString(),
-        text: result?.data?.response || result?.reply || "No response from AI.",
+        text: result?.data?.response || result?.reply || "Something went wrong! Please try again later.",
         isUser: false, timestamp: new Date(), aiResponse: result,
       }
       setChatMessages(prev => [...prev, aiMessage])
@@ -2260,7 +2260,7 @@ export default function ViewDashboard() {
                           </span>
                         </button>
 
-                        <button
+                        {/* <button
                           onClick={() =>
                             handleSuggestionClick(
                               "How do I add more data to my dataset?"
@@ -2271,7 +2271,7 @@ export default function ViewDashboard() {
                           <span className="text-sm text-gray-700">
                             How do I add more data to my dataset?
                           </span>
-                        </button>
+                        </button> */}
                       </div>
                     </div>
                   )}
@@ -2775,8 +2775,8 @@ export default function ViewDashboard() {
               )}
               {explainResponse && (
                 <div className="space-y-4">
-                  <div><h3 className="font-semibold text-gray-900 mb-2">Analysis</h3><p className="text-sm text-gray-700">{explainResponse.response}</p></div>
-                  {explainResponse.business_value?.length > 0 && (
+                  <div><h3 className="font-semibold text-gray-900 mb-2">Explanation</h3><p className="text-sm text-gray-700">{explainResponse.response}</p></div>
+                  {/* {explainResponse.business_value?.length > 0 && (
                     <div>
                       <h3 className="font-semibold text-gray-900 mb-2">Business Value</h3>
                       <ul className="space-y-1">{explainResponse.business_value.map((v, i) => (
@@ -2791,13 +2791,13 @@ export default function ViewDashboard() {
                         <li key={i} className="text-sm text-gray-700 flex items-start gap-2"><span className="text-blue-600 mt-1">•</span><span>{s}</span></li>
                       ))}</ul>
                     </div>
-                  )}
-                  {explainResponse.caveat && (
+                  )} */}
+                  {/* {explainResponse.caveat && (
                     <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
                       <div className="text-yellow-800 text-xs font-medium uppercase tracking-wide">Caveat</div>
                       <div className="text-yellow-700 text-sm mt-1">{explainResponse.caveat}</div>
                     </div>
-                  )}
+                  )} */}
                 </div>
               )}
             </div>
