@@ -7,6 +7,7 @@ import RGL, { WidthProvider } from 'react-grid-layout'
 import Navbar from '../components/Navbar'
 import { authUrl, url } from '../config'
 import { toast } from "react-toastify"
+import { marked } from "marked";
 
 // Icons
 import { RiFilter2Line, RiRobot2Line } from "react-icons/ri"
@@ -15,7 +16,7 @@ import { RxDragHandleDots2 } from "react-icons/rx"
 import {
   FiTrash2, FiSave, FiX, FiEdit, FiMoreVertical, FiFilter,
   FiMaximize, FiSearch, FiChevronDown, FiSettings,
-  FiTrendingUp, FiBarChart, 
+  FiTrendingUp, FiBarChart,
   FiMessageSquare, FiSend, FiTable
 } from "react-icons/fi"
 import { FaSort, FaSortUp, FaSortDown } from "react-icons/fa"
@@ -1043,7 +1044,7 @@ export default function ViewDashboard() {
     }
   }
 
-   const changeDataset = (id) => {
+  const changeDataset = (id) => {
     navigate(`/gallery?datasetId=${id}`);
     selectDataset(id);
   };
@@ -1062,8 +1063,8 @@ export default function ViewDashboard() {
       ai.confidence !== undefined
         ? ai.confidence
         : data?.confidence !== undefined
-        ? data.confidence
-        : undefined;
+          ? data.confidence
+          : undefined;
 
     const conf = typeof rawConf === "string" ? parseFloat(rawConf) : rawConf;
     scrollToBottom();
@@ -1771,7 +1772,7 @@ export default function ViewDashboard() {
         labels: labels || []
       }
       const response = await fetch(`${authUrl.BASE_URL}/explain_with_ai/explain_chart/`, {
-        method: 'POST', headers: {'Content-Type': 'application/json','Authorization': `Bearer ${token}`}, body: JSON.stringify(payload),
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify(payload),
       })
       if (!response.ok) throw new Error(`API request failed with status ${response.status}`)
       const result = await response.json()
@@ -2198,11 +2199,10 @@ export default function ViewDashboard() {
                       <div
                         key={ds.id}
                         onClick={() => changeDataset(ds.id)}
-                        className={`px-2 py-2 cursor-pointer flex justify-between items-center rounded hover:bg-gray-100 ${
-                          selectedId === ds.id
+                        className={`px-2 py-2 cursor-pointer flex justify-between items-center rounded hover:bg-gray-100 ${selectedId === ds.id
                             ? "bg-gray-100 text-gray-800"
                             : "text-gray-800"
-                        }`}
+                          }`}
                       >
                         <span className="truncate">{ds.name}</span>
                         <button
@@ -2282,11 +2282,10 @@ export default function ViewDashboard() {
                       {chatMessages.map((message) => (
                         <div
                           key={message.id}
-                          className={`flex ${
-                            message.isUser
+                          className={`flex ${message.isUser
                               ? "justify-end"
                               : "items-start space-x-2"
-                          }`}
+                            }`}
                         >
                           {!message.isUser && (
                             <div className="w-6 h-6 bg-gray-200 rounded-full flex items-center justify-center flex-shrink-0 mt-1">
@@ -2294,11 +2293,10 @@ export default function ViewDashboard() {
                             </div>
                           )}
                           <div
-                            className={`rounded-xl p-3 max-w-[85%] text-sm ${
-                              message.isUser
+                            className={`rounded-xl p-3 max-w-[85%] text-sm ${message.isUser
                                 ? "bg-gray-700 text-white"
                                 : "bg-gray-50 text-gray-700 border border-gray-200"
-                            }`}
+                              }`}
                           >
                             {message.isUser ? (
                               <p className="leading-relaxed">{message.text}</p>
@@ -2775,8 +2773,13 @@ export default function ViewDashboard() {
               )}
               {explainResponse && (
                 <div className="space-y-4">
-                  <div><h3 className="font-semibold text-gray-900 mb-2">Explanation</h3><p className="text-sm text-gray-700">{explainResponse.response}</p></div>
-                  {/* {explainResponse.business_value?.length > 0 && (
+                  <div>
+                    <h3 className="font-semibold text-gray-900 mb-2">Explanation</h3>
+                    <p
+                      className="text-sm text-gray-700"
+                      dangerouslySetInnerHTML={{ __html: marked(explainResponse.response) }}
+                    />
+                  </div>                  {/* {explainResponse.business_value?.length > 0 && (
                     <div>
                       <h3 className="font-semibold text-gray-900 mb-2">Business Value</h3>
                       <ul className="space-y-1">{explainResponse.business_value.map((v, i) => (
