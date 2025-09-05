@@ -14,10 +14,9 @@ import { RiFilter2Line, RiRobot2Line } from "react-icons/ri"
 import { MdOutlineAddchart } from "react-icons/md"
 import { RxDragHandleDots2 } from "react-icons/rx"
 import {
-  FiTrash2, FiSave, FiX, FiEdit, FiMoreVertical, FiFilter,
-  FiMaximize, FiSearch, FiChevronDown, FiSettings,
-  FiTrendingUp, FiBarChart,
-  FiMessageSquare, FiSend, FiTable
+  FiTrash2, FiSave, FiX, FiEdit, FiMoreVertical,
+  FiMaximize, FiMinimize, FiSearch, FiChevronDown, FiSettings,
+  FiMessageSquare, FiSend, FiRotateCcw
 } from "react-icons/fi"
 import { FaSort, FaSortUp, FaSortDown } from "react-icons/fa"
 import 'react-grid-layout/css/styles.css'
@@ -35,21 +34,20 @@ import "highcharts/modules/boost";
 // Reduce work: disable global animation; prefer local time
 Highcharts.setOptions({
   chart: { animation: false },
+  boost: { useGPUTranslations: true },
   plotOptions: {
     series: {
       animation: false,
-      states: {
-        hover: { halo: { size: 0 } },
-        inactive: { opacity: 1 },
-      },
+      turboThreshold: 100000, // allow huge arrays w/o parsing overhead
+      findNearestPointBy: 'x',
+      states: { hover: { enabled: false } },
     }
   },
-  time: { useUTC: false },
-  boost: {
-    useGPUTranslations: true,
-    seriesThreshold: 1, // boost as early as possible if data is big
-  },
+  tooltip: { animation: false },
   credits: { enabled: false },
+  xAxis: {
+    scrollbar: { enabled: true, showFull: true, liveRedraw: false }
+  },
 });
 
 // shallow compare utility
@@ -115,9 +113,6 @@ function cacheKey(datasetId, widgetId, dbToken) {
 function readCache(datasetId, widgetId, dbToken) {
   try { return JSON.parse(sessionStorage.getItem(cacheKey(datasetId, widgetId, dbToken))) } catch { return null }
 }
-function writeCache(datasetId, widgetId, dbToken, value) {
-  try { sessionStorage.setItem(cacheKey(datasetId, widgetId, dbToken), JSON.stringify(value)) } catch { }
-}
 
 // ---------- small utils ----------
 const transparentizeRgb = (rgbStr, opacity = 0.5) => {
@@ -129,7 +124,6 @@ const transparentizeRgb = (rgbStr, opacity = 0.5) => {
 
 const isErrorish = (obj) => !obj || obj.error || obj.status === false || obj.success === false
 const isValidChartData = (d) => !isErrorish(d) && typeof d.chart_type === 'string'
-const isValidKpiData = (d) => !isErrorish(d)
 
 function chartHasData(chartData) {
   const content = chartData?.data || {}
@@ -299,16 +293,26 @@ function buildChartOptions(chart, colorOffset = 0, useStock = false) {
   const baseStockBits = useStock ? {
     rangeSelector: { enabled: false },
     navigator: { enabled: true },
-    scrollbar: { enabled: true },
-    xAxis: { type: 'datetime' },
+    scrollbar: { enabled: false },
+    xAxis: {
+      type: 'datetime',
+      scrollbar: { enabled: false, showFull: true, liveRedraw: false }
+    },
     tooltip: { split: true },
   } : {}
 
   const base = {
     title: { text: chart_title || '' },
-    legend: { enabled: true },
+    legend: {
+      enabled: true,
+      layout: 'horizontal',
+      align: 'center',
+      verticalAlign: 'top',      // ✅ legend above the plot area
+    },
     colors: rotated,
-    chart: {},
+    chart: {
+      spacingTop: 10,
+    },
     xAxis: {},
     yAxis: {},
     series: [],
@@ -329,43 +333,7 @@ function buildChartOptions(chart, colorOffset = 0, useStock = false) {
       panning: { enabled: true, type: 'x' },
       panKey: 'shift',
       resetZoomButton: { theme: { r: 6 } },
-    }
-  }
-
-  function normalizeCol(s) {
-    return String(s || '')
-      .replace(/\s+/g, ' ')
-      .replace(/["'`]/g, '')
-      .replace(/\b(sum|avg|count|min|max)\s*\(|\)/gi, '') // strip simple agg wrappers
-      .trim()
-      .toLowerCase()
-  }
-
-  function findYSeriesIndices(chartData, colName) {
-    const data = chartData?.data || {}
-    const datasets = Array.isArray(data.datasets) ? data.datasets : []
-    const yRaw = chartData?.y_axis ?? data?.y_axis ?? chartData?.y_axis_title ?? ''
-    const yCols = Array.isArray(yRaw) ? yRaw : String(yRaw).split(',').map(s => s.trim()).filter(Boolean)
-
-    if (!colName) return []
-
-    const target = normalizeCol(colName)
-
-    // 1) exact match against y_axis list (by index)
-    const idxInY = yCols.findIndex(c => normalizeCol(c) === target)
-    if (idxInY !== -1 && idxInY < datasets.length) return [idxInY]
-
-    // 2) match against dataset labels (by name)
-    const labelMatches = []
-    datasets.forEach((ds, i) => {
-      const lab = normalizeCol(ds?.label)
-      if (lab && (lab === target || lab.includes(target))) labelMatches.push(i)
-    })
-    if (labelMatches.length) return labelMatches
-
-    // 3) fallback: if single series, use it; if multi, apply across all
-    if (datasets.length === 1) return [0]
-    return datasets.map((_, i) => i)
+    };
   }
 
   const makeSeries = () =>
@@ -778,6 +746,13 @@ export default function ViewDashboard() {
   const chatMessagesEndRef = useRef(null);
   const [secureDatasetName, setSecureDatasetName] = useState('')
 
+  // Clear chat
+  const clearChat = useCallback(() => {
+    setChatMessages([]);
+    setShowSuggestions(true);
+    setIsTyping(false);
+  }, []);
+
   // kebab outside click
   useEffect(() => { const close = () => setMenuOpenFor(null); document.addEventListener('click', close); return () => document.removeEventListener('click', close) }, [])
   useEffect(() => { if (!modalOpen) return; const onKey = e => { if (e.key === 'Escape') setModalOpen(false) }; document.addEventListener('keydown', onKey); return () => document.removeEventListener('keydown', onKey) }, [modalOpen])
@@ -1080,12 +1055,12 @@ export default function ViewDashboard() {
       case "greeting":
         return (
           <div className="space-y-2">
-            <div className="flex items-center space-x-2">
+            {/* <div className="flex items-center space-x-2">
               <div className="w-2 h-2 bg-green-500 rounded-full"></div>
               <span className="text-sm font-medium text-gray-700">
                 Greeting
               </span>
-            </div>
+            </div> */}
             <p className="text-sm text-gray-700">{data?.response}</p>
           </div>
         );
@@ -1093,12 +1068,12 @@ export default function ViewDashboard() {
       case "analyze_chart":
         return (
           <div className="space-y-3">
-            <div className="flex items-center space-x-2">
+            {/* <div className="flex items-center space-x-2">
               <FiBarChart className="text-blue-500" size={16} />
               <span className="text-sm font-medium text-gray-700">
                 Chart Analysis
               </span>
-            </div>
+            </div> */}
             <div className="bg-blue-50 rounded-lg p-3 space-y-2">
               <p className="text-sm text-gray-700">{data?.response}</p>
               <div className="text-xs text-gray-700">
@@ -1144,12 +1119,12 @@ export default function ViewDashboard() {
       case "analyze_kpi":
         return (
           <div className="space-y-3">
-            <div className="flex items-center space-x-2">
+            {/* <div className="flex items-center space-x-2">
               <FiTrendingUp className="text-green-500" size={16} />
               <span className="text-sm font-medium text-gray-700">
                 KPI Analysis
               </span>
-            </div>
+            </div> */}
 
             <div className="bg-green-50 rounded-lg p-3 space-y-2">
               <p className="text-sm text-gray-700">{data?.response}</p>
@@ -1183,12 +1158,12 @@ export default function ViewDashboard() {
       case "create_kpi":
         return (
           <div className="space-y-3">
-            <div className="flex items-center space-x-2">
+            {/* <div className="flex items-center space-x-2">
               <FiTrendingUp className="text-purple-500" size={16} />
               <span className="text-sm font-medium text-gray-700">
                 KPI Creation
               </span>
-            </div>
+            </div> */}
 
             <div className="bg-purple-50 rounded-lg p-3 space-y-2">
               <div className="text-sm font-medium text-gray-800">
@@ -1214,12 +1189,12 @@ export default function ViewDashboard() {
       case "create_chart":
         return (
           <div className="space-y-3">
-            <div className="flex items-center space-x-2">
+            {/* <div className="flex items-center space-x-2">
               <FiBarChart className="text-indigo-500" size={16} />
               <span className="text-sm font-medium text-gray-700">
                 Chart Proposal
               </span>
-            </div>
+            </div> */}
             <div className="bg-indigo-50 rounded-lg p-3 space-y-2">
               <div className="text-sm font-medium text-gray-800">
                 Chart title: {data?.chart_title}
@@ -1251,12 +1226,12 @@ export default function ViewDashboard() {
       case "table_query":
         return (
           <div className="space-y-3">
-            <div className="flex items-center space-x-2">
+            {/* <div className="flex items-center space-x-2">
               <FiTable className="text-teal-500" size={16} />
               <span className="text-sm font-medium text-gray-700">
                 Table Query
               </span>
-            </div>
+            </div> */}
             <div className="bg-teal-50 rounded-lg p-3 space-y-2">
               <p className="text-sm text-gray-700">{data?.response}</p>
               {data?.sql_suggestion && (
@@ -1272,12 +1247,12 @@ export default function ViewDashboard() {
       case "other":
         return (
           <div className="space-y-2">
-            <div className="flex items-center space-x-2">
+            {/* <div className="flex items-center space-x-2">
               <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
               <span className="text-sm font-medium text-gray-700">
                 General Query
               </span>
-            </div>
+            </div> */}
             <p className="text-sm text-gray-700">{data?.response}</p>
             <div className="text-xs text-gray-500 italic">
               For data-related questions, try asking about your charts or KPIs!
@@ -2148,41 +2123,40 @@ export default function ViewDashboard() {
 
       {activePanel && (
         <div
-          className="fixed w-[320px] left-[70px] h-[500px] z-30 top-[60px] rounded-lg overflow-hidden drop-shadow-xl flex bg-black bg-opacity-25"
+          className="fixed z-30 top-[60px] left-[70px] w-[420px] h-[600px] rounded-2xl overflow-hidden drop-shadow-2xl flex bg-black/25"
           onClick={() => setActivePanel(null)}
         >
           <div
-            className="bg-white border border-gray-200 text-gray-600 w-full max-h-[500px] overflow-y-auto scrollsettings rounded-lg"
+            className="bg-white border flex flex-col border-gray-200 text-gray-600 w-full overflow-hidden scrollsettings h-full rounded-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="flex items-center justify-between p-4 border-b border-gray-200">
-              <p className="text-lg font-medium text-gray-800">
+            <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gradient-to-r from-indigo-600 to-fuchsia-600 text-white">
+              <p className="text-lg font-medium">
                 {activePanel === "dataset" && "Datasets"}
                 {activePanel === "chatbot" && (
                   <>
                     {" "}
                     <div className="flex items-center space-x-2">
-                      <div className="w-6 h-6 bg-gray-200 rounded-full flex items-center justify-center">
-                        <FiMessageSquare className="text-gray-600 text-xs" />
-                      </div>
-                      <span className="text-md font-medium text-gray-600">
-                        AI Assistant
+                      <span className="text-md font-medium ">
+                        Byteloom Assistant
                       </span>
                     </div>
                   </>
                 )}
               </p>
-              <button
-                onClick={() => setActivePanel(null)}
-                className="p-1 rounded hover:bg-gray-200"
-                title="Close"
-              >
-                <FiX size={20} />
-              </button>
+              <div className='flex gap-2'>
+                <button
+                  onClick={() => setActivePanel(null)}
+                  className="p-1 rounded hover:scale-105"
+                  title="Close"
+                >
+                  <FiX size={20} />
+                </button>
+              </div>
             </div>
             {/* Content list */}
-            <div className="p-2">
+            <div className=" h-full">
               {activePanel === "dataset" && (
                 <div className="space-y-2">
                   {loadingDatasets ? (
@@ -2200,8 +2174,8 @@ export default function ViewDashboard() {
                         key={ds.id}
                         onClick={() => changeDataset(ds.id)}
                         className={`px-2 py-2 cursor-pointer flex justify-between items-center rounded hover:bg-gray-100 ${selectedId === ds.id
-                            ? "bg-gray-100 text-gray-800"
-                            : "text-gray-800"
+                          ? "bg-gray-100 text-gray-800"
+                          : "text-gray-800"
                           }`}
                       >
                         <span className="truncate">{ds.name}</span>
@@ -2218,143 +2192,137 @@ export default function ViewDashboard() {
                 </div>
               )}
               {activePanel === "chatbot" && (
-                <div className="flex flex-col h-full">
-                  {/* Welcome Message and Suggestions */}
-                  {showSuggestions && chatMessages.length === 0 && (
-                    <div className="p-4 space-y-4">
-                      {/* Welcome Section */}
-                      <div className="space-y-3">
-                        <div className="space-y-3 text-sm text-gray-600 leading-relaxed">
-                          <p>
-                            Ask me anything about your data, charts, or KPIs to
-                            get started!
-                          </p>
+                <div className="relative flex flex-col h-full">
+                  {/* Messages / suggestions */}
+                  <div className="overflow-y-auto scrollsettings h-[475px] p-4 space-y-3 bg-[#F7F8FA]">
+                    {showSuggestions && chatMessages.length === 0 && (
+                      <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4">
+                        <div className="text-sm text-indigo-900 mb-3">
+                          Ask me anything about your data, charts, or KPIs to get started.
+                        </div>
+                        <div className="grid gap-2">
+                          <button
+                            onClick={() =>
+                              handleSuggestionClick("Can you explain me the charts in my dataset?")
+                            }
+                            className="text-left px-3 py-2 rounded-lg bg-white hover:bg-indigo-50 border border-indigo-100 text-sm text-indigo-900"
+                          >
+                            Can you explain me the charts in my dataset?
+                          </button>
+                          <button
+                            onClick={() => handleSuggestionClick("Please generate a chart for me.")}
+                            className="text-left px-3 py-2 rounded-lg bg-white hover:bg-indigo-50 border border-indigo-100 text-sm text-indigo-900"
+                          >
+                            Please generate a chart for me.
+                          </button>
                         </div>
                       </div>
+                    )}
 
-                      {/* Suggestion Buttons */}
-                      <div className="space-y-2">
-                        <button
-                          onClick={() =>
-                            handleSuggestionClick(
-                              "Can you explain me the charts in my dataset?"
-                            )
-                          }
-                          className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors"
-                        >
-                          <span className="text-sm text-gray-700">
-                            Can you explain me the charts in my dataset?
-                          </span>
-                        </button>
-
-                        <button
-                          onClick={() =>
-                            handleSuggestionClick(
-                              "Please generate a chart for me."
-                            )
-                          }
-                          className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors"
-                        >
-                          <span className="text-sm text-gray-700">
-                            Please generate a chart for me.
-                          </span>
-                        </button>
-
-                        {/* <button
-                          onClick={() =>
-                            handleSuggestionClick(
-                              "How do I add more data to my dataset?"
-                            )
-                          }
-                          className="w-full text-left p-3 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors"
-                        >
-                          <span className="text-sm text-gray-700">
-                            How do I add more data to my dataset?
-                          </span>
-                        </button> */}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Chat Messages */}
-                  {chatMessages.length > 0 && (
-                    <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-[200px] max-h-[300px]">
-                      {chatMessages.map((message) => (
+                    {chatMessages.map((message) => {
+                      const isUser = message.isUser;
+                      return (
                         <div
                           key={message.id}
-                          className={`flex ${message.isUser
-                              ? "justify-end"
-                              : "items-start space-x-2"
-                            }`}
+                          className={`flex ${isUser ? "justify-end" : "justify-start"}`}
                         >
-                          {!message.isUser && (
-                            <div className="w-6 h-6 bg-gray-200 rounded-full flex items-center justify-center flex-shrink-0 mt-1">
-                              <FiMessageSquare className="text-gray-600 text-xs" />
-                            </div>
-                          )}
+                          {/* Bubble */}
                           <div
-                            className={`rounded-xl p-3 max-w-[85%] text-sm ${message.isUser
-                                ? "bg-gray-700 text-white"
-                                : "bg-gray-50 text-gray-700 border border-gray-200"
-                              }`}
+                            className={[
+                              "max-w-[85%] rounded-2xl px-3 py-2 shadow-sm",
+                              isUser
+                                ? "bg-indigo-600 text-white"
+                                : "bg-white text-gray-800 border border-gray-200",
+                            ].join(" ")}
                           >
-                            {message.isUser ? (
-                              <p className="leading-relaxed">{message.text}</p>
-                            ) : (
-                              renderAIMessage(message)
-                            )}
-                          </div>
-                        </div>
-                      ))}
-
-                      {/* Typing Indicator */}
-                      {isTyping && (
-                        <div className="flex items-start space-x-2">
-                          <div className="w-6 h-6 bg-gray-200 rounded-full flex items-center justify-center flex-shrink-0 mt-1">
-                            <FiMessageSquare className="text-gray-600 text-xs" />
-                          </div>
-                          <div className="bg-gray-50 rounded-xl border border-gray-200 p-3">
-                            <div className="flex items-center space-x-2">
-                              <div className="flex space-x-1">
-                                <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"></div>
-                                <div
-                                  className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"
-                                  style={{ animationDelay: "0.2s" }}
-                                ></div>
-                                <div
-                                  className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"
-                                  style={{ animationDelay: "0.4s" }}
-                                ></div>
+                            {/* Avatar + name */}
+                            <div className="flex items-center gap-2 mb-1">
+                              <div
+                                className={[
+                                  "w-6 h-6 rounded-full grid place-items-center text-[11px] font-semibold",
+                                  isUser ? "bg-white/20 text-white" : "bg-indigo-600 text-white",
+                                ].join(" ")}
+                              >
+                                {isUser ? "M" : "B"}
                               </div>
-                              <span className="text-xs text-gray-500">
-                                AI is thinking...
+                              <span
+                                className={[
+                                  "text-xs font-medium",
+                                  isUser ? "text-white/90" : "text-gray-700",
+                                ].join(" ")}
+                              >
+                                {isUser ? "Me" : "Byteloom"}
                               </span>
                             </div>
+
+                            {/* Content */}
+                            <div className="text-sm leading-relaxed">
+                              {isUser ? (
+                                <p>{message.text}</p>
+                              ) : (
+                                renderAIMessage(message)
+                              )}
+                            </div>
                           </div>
                         </div>
-                      )}
+                      );
+                    })}
 
-                      {/* Scroll anchor */}
-                      <div ref={chatMessagesEndRef} />
-                    </div>
-                  )}
+                    {/* Typing indicator */}
+                    {isTyping && (
+                      <div className="flex items-start gap-2">
+                        <div className="w-6 h-6 rounded-full bg-indigo-600 text-white grid place-items-center text-[11px] font-semibold">
+                          B
+                        </div>
+                        <div className="bg-gray-50 border border-gray-200 rounded-2xl px-3 py-2 text-sm text-gray-600">
+                          <span className="inline-flex items-center gap-1">
+                            <span className="h-2 w-2 rounded-full bg-gray-400 animate-pulse" />
+                            <span
+                              className="h-2 w-2 rounded-full bg-gray-400 animate-pulse"
+                              style={{ animationDelay: "0.15s" }}
+                            />
+                            <span
+                              className="h-2 w-2 rounded-full bg-gray-400 animate-pulse"
+                              style={{ animationDelay: "0.3s" }}
+                            />
+                          </span>
+                        </div>
+                      </div>
+                    )}
 
-                  {/* Chat Input */}
-                  <div className="p-4 border-t border-gray-200 bg-white">
-                    <div className="flex space-x-2">
+                    {/* Anchor */}
+                    <div ref={chatMessagesEndRef} />
+                  </div>
+
+                  {/* Input row */}
+                  <div className="p-2 px-4 border-t border-gray-200 bg-white">
+                    <div className="flex items-center gap-2">
+                      {/* Clear button on the left */}
+                      <button
+                        onClick={clearChat}
+                        className="px-4 py-4 rounded-xl border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        title="Clear chat"
+                      >
+                        <div className="flex items-center gap-2 text-sm">
+                          <FiRotateCcw />
+                        </div>
+                      </button>
+
+                      {/* Input */}
                       <input
                         type="text"
                         id="aiInput"
-                        // value={chatInput}
                         onKeyPress={handleKeyPress}
                         onChange={(e) => checkState(e.target.value)}
                         placeholder="Ask a question or request..."
-                        className="flex-1 px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm bg-gray-50"
+                        className="flex-1 px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
                       />
 
+                      {/* Send */}
                       <button
                         onClick={handleSendMessage}
-                        className="px-4 py-3 bg-gray-700 text-white rounded-xl hover:bg-gray-800 transition-colors focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="px-4 py-4 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        title="Send"
                       >
                         <FiSend className="text-sm" />
                       </button>
@@ -2779,7 +2747,8 @@ export default function ViewDashboard() {
                       className="text-sm text-gray-700"
                       dangerouslySetInnerHTML={{ __html: marked(explainResponse.response) }}
                     />
-                  </div>                  {/* {explainResponse.business_value?.length > 0 && (
+                  </div>
+                  {/* {explainResponse.business_value?.length > 0 && (
                     <div>
                       <h3 className="font-semibold text-gray-900 mb-2">Business Value</h3>
                       <ul className="space-y-1">{explainResponse.business_value.map((v, i) => (

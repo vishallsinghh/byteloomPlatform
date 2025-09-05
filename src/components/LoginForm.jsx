@@ -82,9 +82,7 @@ export default function LoginForm({
         navigate("/dashboard", { replace: true });
       }, 1500);
     } catch (err) {
-      const msg =
-        err.response?.data?.message || err.message || "Login failed";
-      toast.error(msg);
+      toast.error(err.response.data.errors.errors[0]);
     } finally {
       setIsLoading(false);
     }
