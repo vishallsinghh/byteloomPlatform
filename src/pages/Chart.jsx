@@ -286,36 +286,36 @@ const getDummyOptions = (type) => {
           },
         ],
       };
-case "worldmap": {
-  const sampleMap = [
-    ["in", 120], // India
-    ["us", 300], // United States
-    ["cn", 250], // China
-    ["br", 180], // Brazil
-    ["fr", 200]  // France
-  ];
+    case "worldmap": {
+      const sampleMap = [
+        ["in", 120], // India
+        ["us", 300], // United States
+        ["cn", 250], // China
+        ["br", 180], // Brazil
+        ["fr", 200]  // France
+      ];
 
-  return {
-    credits: { enabled: false },
-    chart: {
-      map: worldMap, 
-      type: "map",      // ← explicitly a map chart
-      height: 200
-    },
-    title: { text: "" },
-    mapNavigation: { enabled: false },
-    colorAxis: { min: 0 },
-    series: [{
-      type: "map",      // ← map series
-      mapData: worldMap,
-      data: sampleMap,
-      joinBy: ["hc-key","hc-key"],
-      name: "Sample Values",
-      states: { hover: { color: "#BADA55" } },
-      dataLabels: { enabled: true, format: "{point.name}" }
-    }]
-  };
-}
+      return {
+        credits: { enabled: false },
+        chart: {
+          map: worldMap,
+          type: "map",      // ← explicitly a map chart
+          height: 200
+        },
+        title: { text: "" },
+        mapNavigation: { enabled: false },
+        colorAxis: { min: 0 },
+        series: [{
+          type: "map",      // ← map series
+          mapData: worldMap,
+          data: sampleMap,
+          joinBy: ["hc-key", "hc-key"],
+          name: "Sample Values",
+          states: { hover: { color: "#BADA55" } },
+          dataLabels: { enabled: true, format: "{point.name}" }
+        }]
+      };
+    }
 
 
     default:
@@ -378,8 +378,8 @@ function DraggableDashboard() {
   const [isDirty, setIsDirty] = useState(false);
   const [hoveredType, setHoveredType] = useState(null);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
-const [filterDraft, setFilterDraft] = useState({ column: "", operator: "", value: "" });
-const [appliedFilters, setAppliedFilters] = useState([]);
+  const [filterDraft, setFilterDraft] = useState({ column: "", operator: "", value: "" });
+  const [appliedFilters, setAppliedFilters] = useState([]);
   const blockRef = useRef(null);
   const canvasRef = useRef(null);
   const [searchParams] = useSearchParams();
@@ -446,25 +446,25 @@ const [appliedFilters, setAppliedFilters] = useState([]);
     setDatasetId(id);
     const dbToken = localStorage.getItem("db_token");
     const token = localStorage.getItem("accessToken");
-    const payload ={
+    const payload = {
       db_token: dbToken,
       dataset_id: id
     }
     fetch(`${url.BASE_URL}/dataset/dataset1000rows/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify(payload)
-      }
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(payload)
+    }
     )
       .then((r) => {
         if (!r.ok) throw new Error("Network error");
         return r.json();
       })
-       .then((payload) => {
-   // NEW API returns { message, success, data: [...] }
-   const normalized = Array.isArray(payload) ? payload : (payload?.data ?? []);
-   setTableData(normalized);
- })
+      .then((payload) => {
+        // NEW API returns { message, success, data: [...] }
+        const normalized = Array.isArray(payload) ? payload : (payload?.data ?? []);
+        setTableData(normalized);
+      })
       .catch(console.error);
   }, [searchParams]);
 
@@ -487,39 +487,39 @@ const [appliedFilters, setAppliedFilters] = useState([]);
     }));
     setCharts(loaded);
   }, [tableData]);
-function isChartConfigured(c) {
-  if (!c) return false;
+  function isChartConfigured(c) {
+    if (!c) return false;
 
-  // common helpers
-  const has = (v) => v != null && v !== "";
+    // common helpers
+    const has = (v) => v != null && v !== "";
 
-  switch (c.type) {
-    case "grid":
-      return Array.isArray(c.selectedColumns) && c.selectedColumns.length > 0;
+    switch (c.type) {
+      case "grid":
+        return Array.isArray(c.selectedColumns) && c.selectedColumns.length > 0;
 
-    case "heatmap":
-      // X and Y are required; Z optional
-      return has(c.xField) && has(c.yField);
+      case "heatmap":
+        // X and Y are required; Z optional
+        return has(c.xField) && has(c.yField);
 
-    case "worldmap":
-      // require country field (xField) + value field (zField)
-      return has(c.xField) && has(c.zField);
+      case "worldmap":
+        // require country field (xField) + value field (zField)
+        return has(c.xField) && has(c.zField);
 
-    case "multi_bar":
-    case "multi_line":
-      return (
-        has(c.xField) &&
-        Array.isArray(c.yFields) &&
-        c.yFields.length > 0 &&
-        c.yFields.every(has)
-      );
+      case "multi_bar":
+      case "multi_line":
+        return (
+          has(c.xField) &&
+          Array.isArray(c.yFields) &&
+          c.yFields.length > 0 &&
+          c.yFields.every(has)
+        );
 
-    default:
-      // single-series (bar, line, pie, etc.)
-      return has(c.xField) && has(c.yField);
+      default:
+        // single-series (bar, line, pie, etc.)
+        return has(c.xField) && has(c.yField);
+    }
   }
-}
-const selectedChart = React.useMemo(
+  const selectedChart = React.useMemo(
     () => charts.find((c) => c.id === selectedChartId),
     [charts, selectedChartId]
   );
@@ -539,104 +539,104 @@ const selectedChart = React.useMemo(
   const sampleFields = tableData?.length
     ? Object.keys(flattenObject(tableData[0]))
     : [];
-const flatSampleRow = tableData?.length ? flattenObject(tableData[0]) : {};
+  const flatSampleRow = tableData?.length ? flattenObject(tableData[0]) : {};
 
-// get nested value by path
-const getByPath = (obj, path) =>
-  path.split(".").reduce((o, p) => (o && o[p] != null ? o[p] : undefined), obj);
+  // get nested value by path
+  const getByPath = (obj, path) =>
+    path.split(".").reduce((o, p) => (o && o[p] != null ? o[p] : undefined), obj);
 
-// chart fields eligible for filtering (depends on chart type)
-const chartFields = React.useMemo(() => {
-  const c = charts.find(ch => ch.id === selectedChartId);
-  if (!c) return [];
-  if (c.type === "grid") return c.selectedColumns || [];
-  if (c.type === "heatmap") return [c.xField, c.yField, c.zField].filter(Boolean);
-  if (c.type === "worldmap") return [c.xField, c.zField].filter(Boolean);
-  if (c.type === "multi_bar" || c.type === "multi_line") return [c.xField, ...(c.yFields || [])].filter(Boolean);
-  return [c.xField, c.yField].filter(Boolean);
-}, [charts, selectedChartId]);
+  // chart fields eligible for filtering (depends on chart type)
+  const chartFields = React.useMemo(() => {
+    const c = charts.find(ch => ch.id === selectedChartId);
+    if (!c) return [];
+    if (c.type === "grid") return c.selectedColumns || [];
+    if (c.type === "heatmap") return [c.xField, c.yField, c.zField].filter(Boolean);
+    if (c.type === "worldmap") return [c.xField, c.zField].filter(Boolean);
+    if (c.type === "multi_bar" || c.type === "multi_line") return [c.xField, ...(c.yFields || [])].filter(Boolean);
+    return [c.xField, c.yField].filter(Boolean);
+  }, [charts, selectedChartId]);
 
-// keep only ones that actually exist in flattened rows
-const availableFilterFields = chartFields.filter(f =>
-  Object.prototype.hasOwnProperty.call(flatSampleRow, f)
-);
+  // keep only ones that actually exist in flattened rows
+  const availableFilterFields = chartFields.filter(f =>
+    Object.prototype.hasOwnProperty.call(flatSampleRow, f)
+  );
 
-function isOdooDateLike(v) {
-  if (v instanceof Date) return true;
-  if (typeof v !== "string") return false;
+  function isOdooDateLike(v) {
+    if (v instanceof Date) return true;
+    if (typeof v !== "string") return false;
 
-  const s = v.trim();
+    const s = v.trim();
 
-  // pure date: YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
-    const [y, m, d] = s.split("-").map(Number);
-    const dateObj = new Date(Date.UTC(y, m - 1, d)); // UTC to avoid timezone shifts
-    return dateObj.getUTCFullYear() === y &&
-      dateObj.getUTCMonth() === m - 1 &&
-      dateObj.getUTCDate() === d;
+    // pure date: YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      const [y, m, d] = s.split("-").map(Number);
+      const dateObj = new Date(Date.UTC(y, m - 1, d)); // UTC to avoid timezone shifts
+      return dateObj.getUTCFullYear() === y &&
+        dateObj.getUTCMonth() === m - 1 &&
+        dateObj.getUTCDate() === d;
+    }
+
+    // datetime: YYYY-MM-DD HH:mm:ss(.microsec)?(TZ?)
+    if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}(?::?\d{2})?)?$/.test(s)) {
+      const iso = s.replace(" ", "T");
+      const d = new Date(iso.includes("Z") || /[+-]\d{2}/.test(iso) ? iso : iso + "Z");
+      return !isNaN(d.getTime());
+    }
+
+    return false;
   }
 
-  // datetime: YYYY-MM-DD HH:mm:ss(.microsec)?(TZ?)
-  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}(?::?\d{2})?)?$/.test(s)) {
-    const iso = s.replace(" ", "T");
-    const d = new Date(iso.includes("Z") || /[+-]\d{2}/.test(iso) ? iso : iso + "Z");
-    return !isNaN(d.getTime());
+  function isDateField(col) {
+    if (!col || !tableData?.length) return false;
+    return tableData.some(row => isOdooDateLike(getByPath(row, col)));
   }
 
-  return false;
-}
+  function isNumberField(col) {
+    if (!col || !tableData?.length) return false;
+    return tableData.every(row => {
+      const v = getByPath(row, col);
+      return v == null || !isNaN(Number(v));
+    });
+  }
 
-function isDateField(col) {
-  if (!col || !tableData?.length) return false;
-  return tableData.some(row => isOdooDateLike(getByPath(row, col)));
-}
-
-function isNumberField(col) {
-  if (!col || !tableData?.length) return false;
-  return tableData.every(row => {
-    const v = getByPath(row, col);
-    return v == null || !isNaN(Number(v));
-  });
-}
-
-function getOperatorOptions(col) {
-  if (isNumberField(col)) {
+  function getOperatorOptions(col) {
+    if (isNumberField(col)) {
+      return [
+        { value: "=", label: "=" },
+        { value: ">", label: ">" },
+        { value: "<", label: "<" },
+      ];
+    }
     return [
-      { value: "=", label: "=" },
-      { value: ">", label: ">" },
-      { value: "<", label: "<" },
+      { value: "contains", label: "Contains" },
+      { value: "begins_with", label: "Begins with" },
+      { value: "ends_with", label: "Ends with" },
     ];
   }
-  return [
-    { value: "contains", label: "Contains" },
-    { value: "begins_with", label: "Begins with" },
-    { value: "ends_with", label: "Ends with" },
-  ];
-}
 
 
 
 
-// derive options once per render
-const options = availableFilterFields.length ? availableFilterFields : sampleFields;
+  // derive options once per render
+  const options = availableFilterFields.length ? availableFilterFields : sampleFields;
 
-// if the current column isn't available anymore, fall back to ""
-const safeColumnValue = options.includes(filterDraft.column) ? filterDraft.column : "";
+  // if the current column isn't available anymore, fall back to ""
+  const safeColumnValue = options.includes(filterDraft.column) ? filterDraft.column : "";
 
-// keep filterDraft consistent if options change (optional but recommended)
-useEffect(() => {
-  if (!options.includes(filterDraft.column)) {
-    setFilterDraft({ column: "", operator: "", value: "" });
-  }
-}, [options.join(","), filterDraft.column]);
+  // keep filterDraft consistent if options change (optional but recommended)
+  useEffect(() => {
+    if (!options.includes(filterDraft.column)) {
+      setFilterDraft({ column: "", operator: "", value: "" });
+    }
+  }, [options.join(","), filterDraft.column]);
   // Add chart
   const addChart = (type) => {
-  const w = 550, h = 480;
-   const container = canvasRef.current;
+    const w = 550, h = 480;
+    const container = canvasRef.current;
     // center the new chart in the canvas:
-    const x = container ? (container.clientWidth  - w) / 3 : 0;
+    const x = container ? (container.clientWidth - w) / 3 : 0;
     const y = container ? (container.clientHeight - h) / 3 : 0;
-   
+
     const newC = {
       id: `chart-${Date.now()}`,
       name: `${type} Chart`,
@@ -728,7 +728,8 @@ useEffect(() => {
         dataset_id: parseInt(datasetId, 10),
         chart_title: editableName,
         chart_type: "grid",
-        columns: selectedChart.selectedColumns,
+        x_axis: `${selectedChart.selectedColumns[0]}`,
+        y_axis: `${selectedChart.selectedColumns}`,
       };
     } else if (["multi_bar", "multi_line"].includes(selectedChart.type)) {
       payload = {
@@ -751,14 +752,14 @@ useEffect(() => {
         y_axis: `${selectedChart.aggFn}(${selectedChart.yField})`,
       };
     }
-// include order_by if user picked it
-if (selectedChart.orderBy) {
-  payload.order_by = selectedChart.orderBy;
-}
-if (appliedFilters.length) {
-  payload.filter = JSON.stringify(appliedFilters);
-}
-    
+    // include order_by if user picked it
+    if (selectedChart.orderBy) {
+      payload.order_by = selectedChart.orderBy;
+    }
+    if (appliedFilters.length) {
+      payload.filter = JSON.stringify(appliedFilters);
+    }
+
     try {
       const res = await fetch(`${url.BASE_URL}/dataset/create/chart/`, {
         method: "POST",
@@ -832,21 +833,21 @@ if (appliedFilters.length) {
                   <span className="text-[10px]">Fields</span>
                 </div>
                 <div className="flex flex-col items-center">
-  <button
-    className={cn(
-      "p-2 rounded",
-      filtersDisabled ? "opacity-50 cursor-not-allowed" : "hover:bg-gray-200"
-    )}
-    onClick={() => {
-      if (!filtersDisabled) setFilterPanelOpen(true);
-    }}
-    title={filtersDisabled ? "Configure the chart first" : "Filters"}
-    disabled={filtersDisabled}
-  >
-    <FiFilter size={20} className="text-gray-600" />
-  </button>
-  <span className="text-[10px]">Filters</span>
-</div>
+                  <button
+                    className={cn(
+                      "p-2 rounded",
+                      filtersDisabled ? "opacity-50 cursor-not-allowed" : "hover:bg-gray-200"
+                    )}
+                    onClick={() => {
+                      if (!filtersDisabled) setFilterPanelOpen(true);
+                    }}
+                    title={filtersDisabled ? "Configure the chart first" : "Filters"}
+                    disabled={filtersDisabled}
+                  >
+                    <FiFilter size={20} className="text-gray-600" />
+                  </button>
+                  <span className="text-[10px]">Filters</span>
+                </div>
                 <div className="flex flex-col items-center">
                   <button
                     className="p-2 rounded hover:bg-gray-200"
@@ -1006,148 +1007,148 @@ if (appliedFilters.length) {
                   </div>
                 </div>
               )}
-              
+
             </aside>
-{filterPanelOpen && (
-  <div className="fixed top-[60px] left-[70px] w-[300px] h-[600px] z-30 flex bg-opacity-50">
-    <div className="bg-white border w-full rounded-lg overflow-hidden drop-shadow-lg">
-      {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b">
-        <h3 className="text-lg font-medium">Filters</h3>
-        <button onClick={() => setFilterPanelOpen(false)} className="p-1">
-          <FiX size={20} />
-        </button>
-      </div>
-      {/* Body */}
-      <div className="w-full">
-        {/* Draft row */}
-        <div className="flex flex-col gap-2 p-2 bg-gray-100 border-b">
-          {/* Column selector */}
-          <select
-            className="border w-full p-2 rounded"
-            value={safeColumnValue}
-            onChange={(e) => {
-              const col = e.target.value;
-              if (isDateField(col)) {
-                setFilterDraft({ column: col, operator: "between", value: ["", ""] });
-              } else {
-                setFilterDraft({ column: col, operator: "", value: "" });
-              }
-            }}
-          >
-            <option value="" disabled>Choose column…</option>
-            {options.map(f => <option key={f} value={f}>{f}</option>)}
-          </select>
+            {filterPanelOpen && (
+              <div className="fixed top-[60px] left-[70px] w-[300px] h-[600px] z-30 flex bg-opacity-50">
+                <div className="bg-white border w-full rounded-lg overflow-hidden drop-shadow-lg">
+                  {/* Header */}
+                  <div className="flex items-center justify-between p-4 border-b">
+                    <h3 className="text-lg font-medium">Filters</h3>
+                    <button onClick={() => setFilterPanelOpen(false)} className="p-1">
+                      <FiX size={20} />
+                    </button>
+                  </div>
+                  {/* Body */}
+                  <div className="w-full">
+                    {/* Draft row */}
+                    <div className="flex flex-col gap-2 p-2 bg-gray-100 border-b">
+                      {/* Column selector */}
+                      <select
+                        className="border w-full p-2 rounded"
+                        value={safeColumnValue}
+                        onChange={(e) => {
+                          const col = e.target.value;
+                          if (isDateField(col)) {
+                            setFilterDraft({ column: col, operator: "between", value: ["", ""] });
+                          } else {
+                            setFilterDraft({ column: col, operator: "", value: "" });
+                          }
+                        }}
+                      >
+                        <option value="" disabled>Choose column…</option>
+                        {options.map(f => <option key={f} value={f}>{f}</option>)}
+                      </select>
 
-          {/* Date vs Non-date inputs */}
-          {isDateField(filterDraft.column) ? (
-            <>
-              <input
-                type="date"
-                className="border p-2 py-1.5 w-full rounded"
-                value={filterDraft.value[0]}
-                onChange={e =>
-                  setFilterDraft(fd => ({
-                    column: fd.column,
-                    operator: "between",
-                    value: [e.target.value, fd.value[1]],
-                  }))
-                }
-              />
-              <input
-                type="date"
-                className="border p-2 py-1.5 w-full rounded"
-                value={filterDraft.value[1]}
-                onChange={e =>
-                  setFilterDraft(fd => ({
-                    column: fd.column,
-                    operator: "between",
-                    value: [fd.value[0], e.target.value],
-                  }))
-                }
-              />
-              <button
-                className="bg-blue-600 w-full text-white px-4 py-2 rounded disabled:opacity-50"
-                disabled={!filterDraft.value[0] || !filterDraft.value[1]}
-                onClick={() => {
-                  setAppliedFilters(fs => [
-                    ...fs,
-                    { column: filterDraft.column, operator: "between", value: filterDraft.value }
-                  ]);
-                  setFilterDraft({ column: "", operator: "", value: "" });
-                }}
-              >
-                Add
-              </button>
-            </>
-          ) : (
-            <>
-              <select
-                className="border w-full p-2 rounded"
-                disabled={!filterDraft.column}
-                value={filterDraft.operator}
-                onChange={e => setFilterDraft(fd => ({ ...fd, operator: e.target.value }))}
-              >
-                <option value="" disabled>Select operator…</option>
-                {getOperatorOptions(filterDraft.column).map(op => (
-                  <option key={op.value} value={op.value}>{op.label}</option>
-                ))}
-              </select>
-              <input
-                className="border p-2 w-full rounded"
-                type={isNumberField(filterDraft.column) ? "number" : "text"}
-                placeholder="Value…"
-                value={filterDraft.value}
-                onChange={e => setFilterDraft(fd => ({ ...fd, value: e.target.value }))}
-              />
-              <button
-                className="bg-blue-600 w-full text-white px-4 py-2 rounded disabled:opacity-50"
-                disabled={!filterDraft.column || !filterDraft.operator || !filterDraft.value}
-                onClick={() => {
-                  setAppliedFilters(fs => [...fs, filterDraft]);
-                  setFilterDraft({ column: "", operator: "", value: "" });
-                }}
-              >
-                Add
-              </button>
-            </>
-          )}
-        </div>
+                      {/* Date vs Non-date inputs */}
+                      {isDateField(filterDraft.column) ? (
+                        <>
+                          <input
+                            type="date"
+                            className="border p-2 py-1.5 w-full rounded"
+                            value={filterDraft.value[0]}
+                            onChange={e =>
+                              setFilterDraft(fd => ({
+                                column: fd.column,
+                                operator: "between",
+                                value: [e.target.value, fd.value[1]],
+                              }))
+                            }
+                          />
+                          <input
+                            type="date"
+                            className="border p-2 py-1.5 w-full rounded"
+                            value={filterDraft.value[1]}
+                            onChange={e =>
+                              setFilterDraft(fd => ({
+                                column: fd.column,
+                                operator: "between",
+                                value: [fd.value[0], e.target.value],
+                              }))
+                            }
+                          />
+                          <button
+                            className="bg-blue-600 w-full text-white px-4 py-2 rounded disabled:opacity-50"
+                            disabled={!filterDraft.value[0] || !filterDraft.value[1]}
+                            onClick={() => {
+                              setAppliedFilters(fs => [
+                                ...fs,
+                                { column: filterDraft.column, operator: "between", value: filterDraft.value }
+                              ]);
+                              setFilterDraft({ column: "", operator: "", value: "" });
+                            }}
+                          >
+                            Add
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <select
+                            className="border w-full p-2 rounded"
+                            disabled={!filterDraft.column}
+                            value={filterDraft.operator}
+                            onChange={e => setFilterDraft(fd => ({ ...fd, operator: e.target.value }))}
+                          >
+                            <option value="" disabled>Select operator…</option>
+                            {getOperatorOptions(filterDraft.column).map(op => (
+                              <option key={op.value} value={op.value}>{op.label}</option>
+                            ))}
+                          </select>
+                          <input
+                            className="border p-2 w-full rounded"
+                            type={isNumberField(filterDraft.column) ? "number" : "text"}
+                            placeholder="Value…"
+                            value={filterDraft.value}
+                            onChange={e => setFilterDraft(fd => ({ ...fd, value: e.target.value }))}
+                          />
+                          <button
+                            className="bg-blue-600 w-full text-white px-4 py-2 rounded disabled:opacity-50"
+                            disabled={!filterDraft.column || !filterDraft.operator || !filterDraft.value}
+                            onClick={() => {
+                              setAppliedFilters(fs => [...fs, filterDraft]);
+                              setFilterDraft({ column: "", operator: "", value: "" });
+                            }}
+                          >
+                            Add
+                          </button>
+                        </>
+                      )}
+                    </div>
 
-        {/* Applied list */}
-        <div className="h-[343px] flex flex-col p-2">
-          <div className="flex-1 overflow-auto scrollsettings border-b">
-            {appliedFilters.length === 0 ? (
-              <p className="text-gray-500">No filters added</p>
-            ) : (
-              appliedFilters.map((f, i) => (
-                <div key={i} className="flex justify-between items-center mb-2">
-                  <span className="px-2 py-1 bg-gray-100 rounded truncate">
-                    {f.column} {f.operator} {Array.isArray(f.value) ? f.value.join(" to ") : String(f.value)}
-                  </span>
-                  <button
-                    className="text-red-600 p-1"
-                    onClick={() => setAppliedFilters(fs => fs.filter((_, idx) => idx !== i))}
-                  >
-                    <FiX />
-                  </button>
+                    {/* Applied list */}
+                    <div className="h-[343px] flex flex-col p-2">
+                      <div className="flex-1 overflow-auto scrollsettings border-b">
+                        {appliedFilters.length === 0 ? (
+                          <p className="text-gray-500">No filters added</p>
+                        ) : (
+                          appliedFilters.map((f, i) => (
+                            <div key={i} className="flex justify-between items-center mb-2">
+                              <span className="px-2 py-1 bg-gray-100 rounded truncate">
+                                {f.column} {f.operator} {Array.isArray(f.value) ? f.value.join(" to ") : String(f.value)}
+                              </span>
+                              <button
+                                className="text-red-600 p-1"
+                                onClick={() => setAppliedFilters(fs => fs.filter((_, idx) => idx !== i))}
+                              >
+                                <FiX />
+                              </button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                      <div className="mt-2 flex justify-between">
+                        <button className="bg-gray-300 px-4 py-2 rounded" onClick={() => setAppliedFilters([])}>
+                          Clear All
+                        </button>
+                        <button className="bg-pink-600 text-white px-4 py-2 rounded" onClick={() => setFilterPanelOpen(false)}>
+                          Done
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              ))
+              </div>
             )}
-          </div>
-          <div className="mt-2 flex justify-between">
-            <button className="bg-gray-300 px-4 py-2 rounded" onClick={() => setAppliedFilters([])}>
-              Clear All
-            </button>
-            <button className="bg-pink-600 text-white px-4 py-2 rounded" onClick={() => setFilterPanelOpen(false)}>
-              Done
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-)}
             {/* Main Canvas */}
             <div ref={canvasRef} className="flex-1 bg-gray-100 relative">
               {charts.length === 0 ? (
@@ -1245,8 +1246,8 @@ if (appliedFilters.length) {
                                     const cols =
                                       selectedChart.selectedColumns.includes(f)
                                         ? selectedChart.selectedColumns.filter(
-                                            (c) => c !== f
-                                          )
+                                          (c) => c !== f
+                                        )
                                         : [...selectedChart.selectedColumns, f];
                                     onFieldChange(
                                       selectedChartId,
@@ -1409,7 +1410,7 @@ if (appliedFilters.length) {
                           </div>
 
                           {selectedChart.type === "multi_bar" ||
-                          selectedChart.type === "multi_line" ? (
+                            selectedChart.type === "multi_line" ? (
                             /* ————— multi-series UI unchanged ————— */
                             <>
                               <p className="block text-xs">Y Axis</p>
@@ -1422,24 +1423,24 @@ if (appliedFilters.length) {
                                 </div>
                               ))}
                               {/* …the rest of your “Add value” button… */}
-                                  {/* ————— Order By (multi-series) ————— */}
-    <div>
-      <label className="block text-xs mb-1">Order By</label>
-      <select
-        className="w-full py-2 px-3 rounded-md bg-white border text-gray-800"
-        value={selectedChart.orderBy}
-        onChange={(e) =>
-          onFieldChange(selectedChartId, "orderBy", e.target.value)
-        }
-      >
-        <option value="">— select field —</option>
-        {getOrderByOptions(selectedChart).map((field) => (
-          <option key={field} value={field}>
-            {field}
-          </option>
-        ))}
-      </select>
-    </div>
+                              {/* ————— Order By (multi-series) ————— */}
+                              <div>
+                                <label className="block text-xs mb-1">Order By</label>
+                                <select
+                                  className="w-full py-2 px-3 rounded-md bg-white border text-gray-800"
+                                  value={selectedChart.orderBy}
+                                  onChange={(e) =>
+                                    onFieldChange(selectedChartId, "orderBy", e.target.value)
+                                  }
+                                >
+                                  <option value="">— select field —</option>
+                                  {getOrderByOptions(selectedChart).map((field) => (
+                                    <option key={field} value={field}>
+                                      {field}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
 
                             </>
                           ) : (

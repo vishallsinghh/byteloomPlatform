@@ -18,6 +18,14 @@ import {
   FiMaximize, FiMinimize, FiSearch, FiChevronDown, FiSettings,
   FiMessageSquare, FiSend, FiRotateCcw
 } from "react-icons/fi"
+ import {
+   flexRender,
+   getCoreRowModel,
+   getFilteredRowModel,
+   getPaginationRowModel,
+   getSortedRowModel,
+   useReactTable,
+ } from "@tanstack/react-table";
 import { FaSort, FaSortUp, FaSortDown } from "react-icons/fa"
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
@@ -548,6 +556,7 @@ const ChartCard = React.memo(function ChartCard({
   onMaximize,
   onExplain,
   isFetchingCharts,
+   renderGridTable,
 }) {
   const [open, setOpen] = useState(false); // local menu state (prevents global re-render)
 
@@ -664,9 +673,14 @@ const ChartCard = React.memo(function ChartCard({
           <div className="h-full w-full grid place-items-center text-sm text-gray-500">
             Refreshing…
           </div>
-        ) : chartType === "grid" ? (
-          // reuse your existing grid renderer for 'grid' type
-          <div className="h-full">{/* grid table rendered by parent if needed */}</div>
+    ) : chartType === "grid" ? (
+      <div className="h-full">
+        {renderGridTable
+          ? renderGridTable(widget)
+          : <div className="h-full w-full grid place-items-center text-xs text-gray-400">
+              Grid renderer unavailable
+            </div>}
+      </div>
         ) : (
           <AutoSizeHighchart
             options={options}
@@ -685,6 +699,326 @@ const ChartCard = React.memo(function ChartCard({
     prev.colorIdx === next.colorIdx
   );
 });
+
+// --- Enhanced data grid for "grid" charts (search, sort, filters, pagination, column visibility, CSV) ---
+const GridDataTable = React.memo(function GridDataTable({
+  cols = [],
+  series = [],
+  labels = [],
+  height = "100%",
+}) {
+  // Build rows from your existing column-wise series
+  const rows = useMemo(() => {
+    const rowCount =
+      Array.isArray(labels) && labels.length
+        ? labels.length
+        : series?.[0]?.data?.length || 0;
+
+    const safe = (v) => (v === null || v === undefined ? "" : v);
+
+    return Array.from({ length: rowCount }, (_, rIdx) => {
+      const obj = {};
+      cols.forEach((c, cIdx) => {
+        obj[c] = safe(series?.[cIdx]?.data?.[rIdx]);
+      });
+      return obj;
+    });
+  }, [cols, series, labels]);
+
+  // Table state
+  const [sorting, setSorting] = useState([]);
+  const [globalFilter, setGlobalFilter] = useState("");
+  const [columnFilters, setColumnFilters] = useState([]);
+  const [columnVisibility, setColumnVisibility] = useState({});
+  const [showFilters, setShowFilters] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  // Column defs
+  const columns = useMemo(
+    () =>
+      cols.map((c) => ({
+        header: c,
+        accessorKey: c,
+      })),
+    [cols]
+  );
+
+  const table = useReactTable({
+    data: rows,
+    columns,
+    state: {
+      sorting,
+      globalFilter,
+      columnFilters,
+      columnVisibility,
+    },
+    onSortingChange: setSorting,
+    onGlobalFilterChange: setGlobalFilter,
+    onColumnFiltersChange: setColumnFilters,
+    onColumnVisibilityChange: setColumnVisibility,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+  });
+
+  // CSV export of visible rows/columns
+  const exportCSV = useCallback(() => {
+    const visible = table.getAllLeafColumns().filter((c) => c.getIsVisible());
+    const header = visible.map((c) => `"${String(c.id).replace(/"/g, '""')}"`).join(",");
+    const lines = table.getRowModel().rows.map((row) =>
+      visible
+        .map((col) => {
+          const v = row.getValue(col.id);
+          const s = v == null ? "" : String(v);
+          return `"${s.replace(/"/g, '""')}"`;
+        })
+        .join(",")
+    );
+    const csv = [header, ...lines].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "table_export.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [table]);
+
+  // Close column menu on outside click
+  useEffect(() => {
+    const onDoc = (e) => {
+      if (!menuRef.current) return;
+      if (!menuRef.current.contains(e.target)) setMenuOpen(false);
+    };
+    if (menuOpen) document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [menuOpen]);
+
+  return (
+    <div className="w-full h-full flex flex-col">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <div className="relative">
+          <FiSearch className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            value={globalFilter ?? ""}
+            onChange={(e) => setGlobalFilter(e.target.value)}
+            placeholder="Search..."
+            className="pl-8 pr-3 py-2 text-sm rounded-md border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
+
+        <button
+          onClick={() => setShowFilters((s) => !s)}
+          className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50 active:scale-[0.99]"
+          title="Toggle column filters"
+        >
+          {showFilters ? "Hide Filters" : "Show Filters"}
+        </button>
+
+        <div className="relative" ref={menuRef}>
+          <button
+            onClick={() => setMenuOpen((m) => !m)}
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50 active:scale-[0.99]"
+            title="Show/Hide columns"
+          >
+            Columns ▾
+          </button>
+          {menuOpen && (
+            <div className="absolute z-20 mt-2 w-56 rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+              <div className="max-h-64 overflow-auto pr-1">
+                {table.getAllLeafColumns().map((col) => (
+                  <label
+                    key={col.id}
+                    className="flex items-center gap-2 px-2 py-1 text-sm"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={col.getIsVisible()}
+                      onChange={col.getToggleVisibilityHandler()}
+                    />
+                    <span className="truncate" title={col.id}>
+                      {col.id}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <button
+          onClick={exportCSV}
+          className="ml-auto rounded-md bg-indigo-600 px-3 py-2 text-sm text-white hover:bg-indigo-700 active:scale-[0.99]"
+          title="Export visible rows to CSV"
+        >
+          Export CSV
+        </button>
+      </div>
+
+      {/* Table */}
+      <div
+        className="overflow-auto border border-slate-200 rounded-xl flex-1 min-h-0"
+        style={{ height }}
+      >
+        <table className="min-w-full table-fixed text-xs">
+          <thead className="bg-slate-50 sticky top-0 z-10">
+            {table.getHeaderGroups().map((hg) => (
+              <tr key={hg.id}>
+                {hg.headers.map((header) => {
+                  const canSort = header.column.getCanSort();
+                  const sortDir = header.column.getIsSorted();
+                  return (
+                    <th
+                      key={header.id}
+                      colSpan={header.colSpan}
+                      onClick={
+                        canSort ? header.column.getToggleSortingHandler() : undefined
+                      }
+                      className={[
+                        "border-b border-slate-200 px-3 py-2 font-semibold text-left text-slate-700",
+                        canSort ? "cursor-pointer select-none hover:bg-slate-100" : "",
+                      ].join(" ")}
+                      title={canSort ? "Sort" : undefined}
+                    >
+                      {header.isPlaceholder ? null : (
+                        <div className="flex items-center gap-1">
+                          {flexRender(
+                            header.column.columnDef.header,
+                            header.getContext()
+                          )}
+                          {canSort && (
+                            <span className="text-slate-400">
+                              {sortDir === "asc"
+                                ? "▲"
+                                : sortDir === "desc"
+                                ? "▼"
+                                : "↕"}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </th>
+                  );
+                })}
+              </tr>
+            ))}
+
+            {showFilters && (
+              <tr className="bg-white sticky top-[2.4rem] z-10">
+                {table.getHeaderGroups()[0]?.headers.map((header) => {
+                  const col = header.column;
+                  return (
+                    <th key={header.id} className="border-b border-slate-200 px-3 py-2">
+                      {col.getCanFilter() ? (
+                        <input
+                          value={col.getFilterValue() ?? ""}
+                          onChange={(e) => col.setFilterValue(e.target.value)}
+                          placeholder={`Filter ${col.id}`}
+                          className="w-full rounded-md border border-slate-300 px-2 py-1 text-[11px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      ) : null}
+                    </th>
+                  );
+                })}
+              </tr>
+            )}
+          </thead>
+
+          <tbody>
+            {table.getRowModel().rows.map((row, rIdx) => (
+              <tr
+                key={row.id}
+                className={rIdx % 2 ? "bg-slate-50/60" : "bg-white"}
+              >
+                {row.getVisibleCells().map((cell) => (
+                  <td
+                    key={cell.id}
+                    className="px-3 py-2 border-b border-slate-100 text-slate-800 truncate"
+                    title={String(row.getValue(cell.column.id) ?? "")}
+                  >
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </td>
+                ))}
+              </tr>
+            ))}
+            {table.getRowModel().rows.length === 0 && (
+              <tr>
+                <td
+                  colSpan={table.getAllLeafColumns().length}
+                  className="px-3 py-6 text-center text-slate-500"
+                >
+                  No data.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Pagination */}
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <span className="text-sm text-slate-600">
+          Rows: {table.getFilteredRowModel().rows.length}
+        </span>
+
+        <select
+          className="ml-2 rounded-md border border-slate-300 px-2 py-1 text-sm"
+          value={table.getState().pagination.pageSize}
+          onChange={(e) => table.setPageSize(Number(e.target.value))}
+        >
+          {[10, 20, 50, 100, 200].map((n) => (
+            <option key={n} value={n}>
+              {n} / page
+            </option>
+          ))}
+        </select>
+
+        <div className="ml-auto flex items-center gap-1">
+          <button
+            className="rounded-md border border-slate-300 px-2 py-1 text-sm disabled:opacity-50"
+            onClick={() => table.setPageIndex(0)}
+            disabled={!table.getCanPreviousPage()}
+            title="First page"
+          >
+            «
+          </button>
+          <button
+            className="rounded-md border border-slate-300 px-2 py-1 text-sm disabled:opacity-50"
+            onClick={() => table.previousPage()}
+            disabled={!table.getCanPreviousPage()}
+            title="Previous"
+          >
+            ‹
+          </button>
+          <span className="px-2 text-sm text-slate-700">
+            Page {table.getState().pagination.pageIndex + 1} of{" "}
+            {table.getPageCount() || 1}
+          </span>
+          <button
+            className="rounded-md border border-slate-300 px-2 py-1 text-sm disabled:opacity-50"
+            onClick={() => table.nextPage()}
+            disabled={!table.getCanNextPage()}
+            title="Next"
+          >
+            ›
+          </button>
+          <button
+            className="rounded-md border border-slate-300 px-2 py-1 text-sm disabled:opacity-50"
+            onClick={() => table.setPageIndex(table.getPageCount() - 1)}
+            disabled={!table.getCanNextPage()}
+            title="Last page"
+          >
+            »
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}, shallowEqual);
+
 
 
 // ---------- main component ----------
@@ -1907,46 +2241,24 @@ export default function ViewDashboard() {
     return { labels: newLabels, series: newSeries }
   }
 
-  const renderGridTable = w => {
-    const chart = w
-    const labels = Array.isArray(chart?.data?.data?.labels) ? chart.data.data.labels : []
-    const series = Array.isArray(chart?.data?.data?.datasets) ? chart.data.data.datasets : []
-    const cols = (chart?.data?.y_axis || '').toString().split(',').map(s => s.trim()).filter(Boolean)
-    const sort = gridSort[w.key] || { col: null, dir: null }
-    const { labels: sortedLabels, series: sortedSeries } = sortGridRows(labels, series, sort.col, sort.dir)
-    const toggleSort = colIdx => {
-      setGridSort(prev => {
-        const cur = prev[w.key] || { col: null, dir: null }
-        let dir = 'asc'
-        if (cur.col === colIdx) dir = cur.dir === 'asc' ? 'desc' : cur.dir === 'desc' ? null : 'asc'
-        return { ...prev, [w.key]: { col: dir ? colIdx : null, dir } }
-      })
-    }
-    const sortIcon = colIdx => {
-      if (!sort || sort.col !== colIdx || !sort.dir) return <FaSort className="inline-block ml-1 opacity-50" />
-      return sort.dir === 'asc' ? <FaSortUp className="inline-block ml-1" /> : <FaSortDown className="inline-block ml-1" />
-    }
+  const renderGridTable = (w) => {
+    const chart = w;
+    const labels = Array.isArray(chart?.data?.data?.labels)
+      ? chart.data.data.labels
+      : [];
+    const series = Array.isArray(chart?.data?.data?.datasets)
+      ? chart.data.data.datasets
+      : [];
+    const cols = (chart?.data?.y_axis || "")
+      .toString()
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
     return (
-      <div className="overflow-auto h-full">
-        <table className="min-w-full table-auto text-xs border-collapse">
-          <thead>
-            <tr>{cols.map((c, i) => (
-              <th key={c} className="border px-2 py-1 bg-gray-50 font-medium text-left cursor-pointer select-none" onClick={() => toggleSort(i)} title="Sort">
-                {c} {sortIcon(i)}
-              </th>
-            ))}</tr>
-          </thead>
-          <tbody>
-            {sortedLabels.map((_, rIdx) => (
-              <tr key={rIdx} className="odd:bg-white even:bg-gray-50">
-                {sortedSeries.map((ds, cIdx) => (<td key={cIdx} className="border px-2 py-1">{ds?.data?.[rIdx] ?? ''}</td>))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    )
-  }
+      <GridDataTable cols={cols} series={series} labels={labels} height="100%" />
+    );
+  };
 
   const renderChart = (w, idx, forModal = false) => {
     if (!w?.data) return <div className="h-full w-full grid place-items-center"><div className="text-xs text-gray-400">Loading chart…</div></div>
@@ -1954,7 +2266,6 @@ export default function ViewDashboard() {
 
     const t = String(w?.data?.chart_type || '').toLowerCase()
     if (t === 'grid') return renderGridTable(w)
-
     const labels = Array.isArray(w?.data?.data?.labels) ? w.data.data.labels : []
     const isTs = (t === 'line' || t === 'multi_line' || t === 'area' || t === 'areaspline') && labelsLookLikeDates(labels)
     const constructorType = t === 'worldmap' ? 'mapChart' : isTs ? 'stockChart' : 'chart'
@@ -2405,6 +2716,7 @@ export default function ViewDashboard() {
                     onFilter={handleFilterChart}
                     onMaximize={handleMaximizeChart}
                     onExplain={handleExplainChart}
+                    renderGridTable={renderGridTable}
                   />
                 ) : (
                   <KpiCard
