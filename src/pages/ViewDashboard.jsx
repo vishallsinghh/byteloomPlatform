@@ -18,14 +18,14 @@ import {
   FiMaximize, FiMinimize, FiSearch, FiChevronDown, FiSettings,
   FiMessageSquare, FiSend, FiRotateCcw
 } from "react-icons/fi"
- import {
-   flexRender,
-   getCoreRowModel,
-   getFilteredRowModel,
-   getPaginationRowModel,
-   getSortedRowModel,
-   useReactTable,
- } from "@tanstack/react-table";
+import {
+  flexRender,
+  getCoreRowModel,
+  getFilteredRowModel,
+  getPaginationRowModel,
+  getSortedRowModel,
+  useReactTable,
+} from "@tanstack/react-table";
 import { FaSort, FaSortUp, FaSortDown } from "react-icons/fa"
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
@@ -556,7 +556,7 @@ const ChartCard = React.memo(function ChartCard({
   onMaximize,
   onExplain,
   isFetchingCharts,
-   renderGridTable,
+  renderGridTable,
 }) {
   const [open, setOpen] = useState(false); // local menu state (prevents global re-render)
 
@@ -673,14 +673,14 @@ const ChartCard = React.memo(function ChartCard({
           <div className="h-full w-full grid place-items-center text-sm text-gray-500">
             Refreshing…
           </div>
-    ) : chartType === "grid" ? (
-      <div className="h-full">
-        {renderGridTable
-          ? renderGridTable(widget)
-          : <div className="h-full w-full grid place-items-center text-xs text-gray-400">
-              Grid renderer unavailable
-            </div>}
-      </div>
+        ) : chartType === "grid" ? (
+          <div className="h-full">
+            {renderGridTable
+              ? renderGridTable(widget)
+              : <div className="h-full w-full grid place-items-center text-xs text-gray-400">
+                Grid renderer unavailable
+              </div>}
+          </div>
         ) : (
           <AutoSizeHighchart
             options={options}
@@ -894,8 +894,8 @@ const GridDataTable = React.memo(function GridDataTable({
                               {sortDir === "asc"
                                 ? "▲"
                                 : sortDir === "desc"
-                                ? "▼"
-                                : "↕"}
+                                  ? "▼"
+                                  : "↕"}
                             </span>
                           )}
                         </div>
@@ -1079,6 +1079,7 @@ export default function ViewDashboard() {
   const selectedNameRef = useRef("dataaaaa");
   const chatMessagesEndRef = useRef(null);
   const [secureDatasetName, setSecureDatasetName] = useState('')
+  const [records, setRecords] = useState(true)
 
   // Clear chat
   const clearChat = useCallback(() => {
@@ -1111,6 +1112,7 @@ export default function ViewDashboard() {
 
       if (!layoutJson?.success) throw new Error(layoutJson?.message || 'Failed to load dashboard')
       if (layoutJson.dataset_name) setSecureDatasetName(layoutJson.dataset_name)
+      setRecords(layoutJson.records)
       setDashboardName(layoutJson.name || `Dashboard`)
 
       const baseWidgets = Array.isArray(layoutJson.widgets) ? layoutJson.widgets : []
@@ -2359,6 +2361,50 @@ export default function ViewDashboard() {
   }
   if (error) {
     return (<><Navbar /><div className="mt-[55px] p-6 text-red-600">{error}</div></>)
+  }
+
+  if (records === false) {
+    return (
+      <>
+        <Navbar />
+        <div className="pt-[55px]">
+          <div className="w-full h-[calc(100vh-55px)] flex items-center justify-center bg-slate-50">
+            <div className="max-w-xl w-full mx-auto text-center bg-white border border-slate-200 rounded-2xl shadow-sm p-8">
+              {/* simple broken chart svg */}
+              <div className="mx-auto mb-4">
+                <svg width="160" height="120" viewBox="0 0 160 120" fill="none" aria-hidden="true">
+                  <rect x="14" y="94" width="132" height="2" rx="1" fill="#E5E7EB" />
+                  <rect x="26" y="74" width="18" height="20" rx="2" fill="#E5E7EB" />
+                  <rect x="54" y="60" width="18" height="34" rx="2" fill="#CBD5E1" />
+                  <rect x="82" y="40" width="18" height="54" rx="2" fill="#94A3B8" />
+                  <rect x="110" y="22" width="18" height="72" rx="2" fill="#64748B" />
+                  <circle cx="122" cy="28" r="18" fill="#FEE2E2" stroke="#EF4444" strokeWidth="2" />
+                  <path d="M112 18 L132 38 M132 18 L112 38" stroke="#EF4444" strokeWidth="3" strokeLinecap="round" />
+                </svg>
+              </div>
+
+              <h2 className="text-lg font-semibold text-slate-900">
+                Dashboard couldn’t be generated
+              </h2>
+              <p className="mt-2 text-sm text-slate-600">
+                It looks like the selected fields were empty or not relevant enough to build charts.
+                Please choose valid, data-rich fields and try again.
+              </p>
+
+              <div className="mt-5 flex items-center justify-center gap-2">
+                <button
+                  onClick={deleteDashboard}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500"
+                >
+                  <FiTrash2 size={16} />
+                  Delete dashboard
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </>
+    );
   }
 
   return (
